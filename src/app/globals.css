@@ -1,26 +1,178 @@
 @import "tailwindcss";
 
+/* Dark mode opsional via class .dark pada <html> (default: light untuk lapangan, §8.1) */
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Token desain mengikuti prd.md §8 (Anti AI-Slop).
+  Nilai OKLCH §8.3 — hierarki 60-30-10:
+    60% netral kertas hangat · 30% hijau tua brand · 10% amber accent.
+  Dipetakan ke nama token shadcn/ui agar komponen otomatis ikut tema.
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Netral dominan (60%) */
+  --background: oklch(0.98 0.005 95); /* kertas hangat, bukan putih murni */
+  --foreground: oklch(0.22 0.02 260); /* ink */
+  --surface: oklch(0.96 0.006 95);
+
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.99 0.004 95);
+  --popover-foreground: var(--foreground);
+
+  --muted: oklch(0.94 0.006 95);
+  --muted-foreground: oklch(0.45 0.02 260);
+
+  /* Brand sekunder (30%) — hijau tua kemasan FMCG, BUKAN biru/indigo */
+  --primary: oklch(0.52 0.12 155);
+  --primary-foreground: oklch(0.98 0.01 155);
+
+  --secondary: oklch(0.94 0.006 95);
+  --secondary-foreground: var(--foreground);
+
+  /* Aksen aksi (10%) — amber/oranye hangat untuk CTA & highlight */
+  --accent: oklch(0.72 0.16 65);
+  --accent-foreground: oklch(0.25 0.04 65);
+
+  /* Status semantik (Traffic Light, §8.3) */
+  --critical: oklch(0.58 0.2 25);
+  --critical-foreground: oklch(0.98 0.01 25);
+  --warning: oklch(0.8 0.15 85);
+  --warning-foreground: oklch(0.28 0.05 85);
+  --ok: oklch(0.62 0.14 150);
+  --ok-foreground: oklch(0.98 0.01 150);
+
+  --destructive: var(--critical);
+  --destructive-foreground: var(--critical-foreground);
+
+  /* Garis & fokus (§8.4) */
+  --border: oklch(0.9 0.01 95);
+  --input: oklch(0.9 0.01 95);
+  --ring: oklch(0.52 0.12 155);
+
+  /* Radius kecil & konsisten (§8.4): 6px komponen, 10px kartu */
+  --radius: 0.625rem; /* 10px — kartu */
+  --radius-component: 0.375rem; /* 6px — komponen */
+}
+
+.dark {
+  --background: oklch(0.2 0.01 260);
+  --foreground: oklch(0.94 0.006 95);
+  --surface: oklch(0.24 0.012 260);
+
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.26 0.014 260);
+  --popover-foreground: var(--foreground);
+
+  --muted: oklch(0.28 0.014 260);
+  --muted-foreground: oklch(0.7 0.02 260);
+
+  --primary: oklch(0.62 0.13 155);
+  --primary-foreground: oklch(0.16 0.02 155);
+
+  --secondary: oklch(0.28 0.014 260);
+  --secondary-foreground: var(--foreground);
+
+  --accent: oklch(0.74 0.16 65);
+  --accent-foreground: oklch(0.2 0.04 65);
+
+  --critical: oklch(0.62 0.2 25);
+  --critical-foreground: oklch(0.98 0.01 25);
+  --warning: oklch(0.82 0.15 85);
+  --warning-foreground: oklch(0.24 0.05 85);
+  --ok: oklch(0.66 0.14 150);
+  --ok-foreground: oklch(0.16 0.02 150);
+
+  --destructive: var(--critical);
+  --destructive-foreground: var(--critical-foreground);
+
+  --border: oklch(0.34 0.014 260);
+  --input: oklch(0.34 0.014 260);
+  --ring: oklch(0.62 0.13 155);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-surface: var(--surface);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-critical: var(--critical);
+  --color-critical-foreground: var(--critical-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-ok: var(--ok);
+  --color-ok-foreground: var(--ok-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Tipografi (§8.2) */
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display), var(--font-sans), sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, monospace;
+
+  /* Radius (§8.4) */
+  --radius-sm: var(--radius-component);
+  --radius-md: var(--radius-component);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+
+  /* Motion (§8.5) */
+  --ease-console: cubic-bezier(0.2, 0, 0, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    border-color: var(--color-border);
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
+
+  /* Fokus keyboard selalu terlihat (§8.8) */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  /* Angka uang & metrik rata kolom (§8.2 / §8.6) */
+  .tabular {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Motion fungsional pendek; hormati prefers-reduced-motion (§8.5) */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }

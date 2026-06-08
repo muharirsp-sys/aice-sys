@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.production.example
+aice.db
+public/uploads/*
+!public/uploads/.gitkeep
+npm-debug.log*
+*.log
+.claude
+README.md
