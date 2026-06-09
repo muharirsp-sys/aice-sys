@@ -14,6 +14,7 @@ RUN pnpm install --frozen-lockfile
 
 # Build Next.js (Turbopack). Butuh ~1GB RAM — tambahkan swap di VPS kecil.
 COPY . .
+RUN mkdir -p /data
 RUN pnpm build
 
 # ── Runner ───────────────────────────────────────────────────────────────────
