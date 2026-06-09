@@ -13,7 +13,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "tsx --env-file=.env src/db/seed.ts"
+    "db:seed": "tsx --env-file=.env src/db/seed.ts",
+    "db:seed:prod": "pnpm dlx tsx src/db/seed.ts"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",
