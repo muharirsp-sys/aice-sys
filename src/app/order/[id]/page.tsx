@@ -1,3 +1,11 @@
+/*
+Tujuan: Menampilkan detail lengkap order beserta approval, pengiriman, pembayaran, dan issue.
+Caller: Link order dari dashboard dan audit.
+Dependensi: Session guard, query order, RBAC global, pricing, format, dan DashboardShell.
+Main Functions: OrderDetailPage.
+Side Effects: Membaca sesi dan database.
+*/
+
 import Link from "next/link";
 import { MapPin, ExternalLink, Camera, AlertOctagon } from "lucide-react";
 import { requireUser } from "@/lib/session";
@@ -5,7 +13,7 @@ import { DashboardShell } from "@/components/dashboard-shell";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status-pill";
 import { getOrderDetail } from "@/server/queries";
-import { roleNameFromId } from "@/lib/roles";
+import { hasGlobalDataAccess, roleNameFromId } from "@/lib/roles";
 import { subtotalItem, totalItems } from "@/lib/pricing-calc";
 import { rupiah, tglPendek } from "@/lib/format";
 
@@ -44,10 +52,10 @@ export default async function OrderDetailPage({
   }
 
   const { order: o, approval, pengiriman, pembayaran, issues } = detail;
-  const isOwner = roleNameFromId(user.roleId) === "owner";
+  const canViewAllCabang = hasGlobalDataAccess(roleNameFromId(user.roleId));
 
-  // Scoping: non-owner hanya boleh melihat order cabangnya.
-  if (!isOwner && o.cabangId !== user.cabangId) {
+  // Scoping: user tanpa akses global hanya boleh melihat order cabangnya.
+  if (!canViewAllCabang && o.cabangId !== user.cabangId) {
     return (
       <DashboardShell userName={user.name} roleId={user.roleId} cabangId={user.cabangId}>
         <p className="rounded-md border border-l-4 border-l-critical bg-critical/10 p-4 text-sm font-semibold text-critical">

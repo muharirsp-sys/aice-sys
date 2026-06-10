@@ -1,3 +1,11 @@
+/*
+Tujuan: Menangani mutasi alur order-to-cash dan daily closing secara terotorisasi.
+Caller: Komponen Sales, Admin, Gudang, Delivery, Incaso, dan Closing.
+Dependensi: Drizzle DB, sesi, RBAC, pricing, upload, audit, dan revalidation Next.
+Main Functions: createOrder, approveOrder, rejectOrder, confirmReady, markDelivered, recordPayment, markClosing, lockDate.
+Side Effects: Read/write database, file upload, audit log, dan revalidasi halaman.
+*/
+
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -14,7 +22,12 @@ import {
   dailyClosing,
 } from "@/db/schema";
 import { getCurrentUser } from "@/lib/session";
-import { roleNameFromId, ROLE_LABEL, type RoleName } from "@/lib/roles";
+import {
+  canAccessRole,
+  roleNameFromId,
+  ROLE_LABEL,
+  type RoleName,
+} from "@/lib/roles";
 import { priceOrderLines, type LineInput } from "./pricing";
 import { saveUpload } from "./upload";
 import { writeAudit } from "./audit";
@@ -27,13 +40,13 @@ export type ActionResult =
 
 type Actor = { id: number; cabangId: number; name: string };
 
-// Validasi sesi + peran. Non-owner di-scope ke cabang-nya sendiri.
+// Validasi sesi + peran; super admin dapat bertindak pada seluruh modul.
 async function actorWithRole(
   role: RoleName,
 ): Promise<{ user: Actor } | { error: string }> {
   const u = await getCurrentUser();
   if (!u) return { error: "Sesi berakhir. Silakan login ulang." };
-  if (roleNameFromId(u.roleId) !== role) return { error: "Tidak berwenang." };
+  if (!canAccessRole(roleNameFromId(u.roleId), role)) return { error: "Tidak berwenang." };
   return { user: { id: Number(u.id), cabangId: u.cabangId, name: u.name } };
 }
 

@@ -1,9 +1,17 @@
+/*
+Tujuan: Menampilkan status daily closing dan kontrol closing/penguncian sesuai role.
+Caller: Route /closing.
+Dependensi: Session guard, query closing, RBAC, DashboardShell, dan ClosingPanel.
+Main Functions: ClosingPage.
+Side Effects: Membaca sesi dan database melalui server query.
+*/
+
 import { requireUser } from "@/lib/session";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { PageHeader } from "@/components/ui/page-header";
 import { ClosingPanel } from "@/components/closing/closing-panel";
 import { getClosingState, namaCabang } from "@/server/queries";
-import { roleNameFromId } from "@/lib/roles";
+import { canAccessRole, roleNameFromId } from "@/lib/roles";
 import { tglPendek } from "@/lib/format";
 
 export default async function ClosingPage() {
@@ -26,7 +34,7 @@ export default async function ClosingPage() {
         divisi={state.divisi}
         isLocked={state.isLocked}
         actorRole={roleName}
-        isOwner={roleName === "owner"}
+        isOwner={canAccessRole(roleName, "owner")}
       />
     </DashboardShell>
   );

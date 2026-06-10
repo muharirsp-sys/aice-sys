@@ -1,6 +1,10 @@
-// Seed: master data + user (via Better Auth) + data transaksional contoh.
-// Transaksional agar dashboard/list langsung berisi & alur Order-to-Cash bisa ditelusuri.
-// Idempotent. Jalankan: pnpm db:seed
+/*
+Tujuan: Mengisi ulang database demo dengan master, user, transaksi, dan audit contoh.
+Caller: Script pnpm db:seed dan db:seed:prod saat setup awal.
+Dependensi: Drizzle DB, Better Auth, schema, pricing, dan file system public/uploads.
+Main Functions: main, writePlaceholderBukti.
+Side Effects: Menghapus seluruh data aplikasi/auth, menulis ulang database, dan membuat bukti contoh.
+*/
 
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -32,6 +36,7 @@ import {
 const devPassword = "password123";
 
 const users = [
+  { nama: "Super Admin", email: "superadmin@aice.test", roleId: 7, cabangId: 1 },
   { nama: "Owner Pusat", email: "owner@aice.test", roleId: 6, cabangId: 1 },
   { nama: "Sales Surabaya", email: "sales.sby@aice.test", roleId: 1, cabangId: 1 },
   { nama: "Admin Surabaya", email: "admin.sby@aice.test", roleId: 2, cabangId: 1 },
@@ -93,6 +98,7 @@ async function main() {
     { id: 4, roleName: "delivery" },
     { id: 5, roleName: "incaso" },
     { id: 6, roleName: "owner" },
+    { id: 7, roleName: "super_admin" },
   ]);
 
   await db.insert(cabang).values([

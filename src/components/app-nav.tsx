@@ -1,3 +1,11 @@
+/*
+Tujuan: Menampilkan navigasi dashboard yang sesuai dengan hak akses role aktif.
+Caller: DashboardShell.
+Dependensi: Next Link/pathname, ikon Lucide, dan definisi RoleName.
+Main Functions: AppNav.
+Side Effects: Navigasi client-side.
+*/
+
 "use client";
 
 import Link from "next/link";
@@ -27,7 +35,9 @@ const LINKS = [
   { href: "/audit", label: "Audit", Icon: ScrollText },
 ];
 
-// Tiap peran hanya melihat modul-nya + Closing (RBAC ditegakkan juga di server).
+const ALL_PATHS = LINKS.map((link) => link.href);
+
+// Tiap peran melihat modulnya; super admin melihat seluruh modul.
 const ALLOWED: Record<RoleName, string[]> = {
   sales: ["/sales", "/closing"],
   admin_fakturist: ["/admin", "/closing"],
@@ -35,11 +45,12 @@ const ALLOWED: Record<RoleName, string[]> = {
   delivery: ["/delivery", "/closing"],
   incaso: ["/incaso", "/closing"],
   owner: ["/owner", "/master", "/closing", "/audit"],
+  super_admin: ALL_PATHS,
 };
 
 export function AppNav({ role }: { role: RoleName | null }) {
   const pathname = usePathname();
-  const allowed = role ? ALLOWED[role] : LINKS.map((l) => l.href);
+  const allowed = role ? ALLOWED[role] : ALL_PATHS;
   const links = LINKS.filter((l) => allowed.includes(l.href));
 
   return (

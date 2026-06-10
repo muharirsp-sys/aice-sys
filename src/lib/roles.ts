@@ -1,5 +1,10 @@
-// Sumber kebenaran tunggal untuk 6 peran (prd.md §2) + pemetaan ke dashboard.
-// role.id di-seed deterministik 1..6 (lihat src/db/seed.ts).
+/*
+Tujuan: Sumber kebenaran role, dashboard, label, dan aturan akses lintas role.
+Caller: Session guard, navigasi, halaman, server action, dan audit.
+Dependensi: Data role deterministik dari src/db/seed.ts.
+Main Functions: roleNameFromId, dashboardPathForRoleId, canAccessRole, hasGlobalDataAccess.
+Side Effects: Tidak ada.
+*/
 
 export const ROLE_NAMES = [
   "sales",
@@ -8,6 +13,7 @@ export const ROLE_NAMES = [
   "delivery",
   "incaso",
   "owner",
+  "super_admin",
 ] as const;
 
 export type RoleName = (typeof ROLE_NAMES)[number];
@@ -20,6 +26,7 @@ export const ROLE_BY_ID: Record<number, RoleName> = {
   4: "delivery",
   5: "incaso",
   6: "owner",
+  7: "super_admin",
 };
 
 // role_name -> path dashboard.
@@ -30,6 +37,7 @@ export const ROLE_DASHBOARD: Record<RoleName, string> = {
   delivery: "/delivery",
   incaso: "/incaso",
   owner: "/owner",
+  super_admin: "/owner",
 };
 
 // Label tampilan per peran.
@@ -40,6 +48,7 @@ export const ROLE_LABEL: Record<RoleName, string> = {
   delivery: "Delivery",
   incaso: "Incaso",
   owner: "Owner",
+  super_admin: "Super Admin",
 };
 
 export function roleNameFromId(roleId: number): RoleName | null {
@@ -49,4 +58,15 @@ export function roleNameFromId(roleId: number): RoleName | null {
 export function dashboardPathForRoleId(roleId: number): string | null {
   const name = roleNameFromId(roleId);
   return name ? ROLE_DASHBOARD[name] : null;
+}
+
+export function canAccessRole(
+  actorRole: RoleName | null,
+  requiredRole: RoleName,
+): boolean {
+  return actorRole === "super_admin" || actorRole === requiredRole;
+}
+
+export function hasGlobalDataAccess(role: RoleName | null): boolean {
+  return role === "owner" || role === "super_admin";
 }

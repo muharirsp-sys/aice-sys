@@ -1,5 +1,13 @@
+/*
+Tujuan: Menghasilkan PDF faktur untuk order yang dapat diakses user.
+Caller: Tombol cetak faktur pada modul Admin dan detail order.
+Dependensi: Session guard, RBAC global, query order, renderer PDF, dan audit.
+Main Functions: GET.
+Side Effects: Membaca database, menulis audit log, dan mengirim respons PDF.
+*/
+
 import { requireUser } from "@/lib/session";
-import { roleNameFromId } from "@/lib/roles";
+import { hasGlobalDataAccess, roleNameFromId } from "@/lib/roles";
 import { getOrderView } from "@/server/queries";
 import { renderFakturPdf } from "@/pdf/documents";
 import { writeAudit } from "@/server/audit";
@@ -11,7 +19,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const o = await getOrderView(Number(id));
   if (!o) return new Response("Order tidak ditemukan", { status: 404 });
-  if (roleNameFromId(user.roleId) !== "owner" && o.cabangId !== user.cabangId)
+  if (!hasGlobalDataAccess(roleNameFromId(user.roleId)) && o.cabangId !== user.cabangId)
     return new Response("Tidak berwenang", { status: 403 });
 
   const buf = await renderFakturPdf(o);

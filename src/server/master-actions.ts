@@ -1,3 +1,11 @@
+/*
+Tujuan: Menangani create/update master produk, cabang, toko, harga, dan diskon.
+Caller: Halaman Master Data.
+Dependensi: Drizzle DB, sesi, RBAC owner/super admin, audit, dan revalidation Next.
+Main Functions: upsertProduk, upsertCabang, upsertToko, upsertHarga, upsertDiskon.
+Side Effects: Read/write database, audit log, dan revalidasi halaman.
+*/
+
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -5,7 +13,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { produk, cabang, toko, hargaCabang, diskonToko } from "@/db/schema";
 import { getCurrentUser } from "@/lib/session";
-import { roleNameFromId } from "@/lib/roles";
+import { canAccessRole, roleNameFromId } from "@/lib/roles";
 import { writeAudit } from "./audit";
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -13,7 +21,8 @@ type Result = { ok: true } | { ok: false; error: string };
 async function ownerActor(): Promise<{ error: string } | { userId: number }> {
   const u = await getCurrentUser();
   if (!u) return { error: "Sesi berakhir." };
-  if (roleNameFromId(u.roleId) !== "owner") return { error: "Hanya Owner." };
+  if (!canAccessRole(roleNameFromId(u.roleId), "owner"))
+    return { error: "Hanya Owner atau Super Admin." };
   return { userId: Number(u.id) };
 }
 

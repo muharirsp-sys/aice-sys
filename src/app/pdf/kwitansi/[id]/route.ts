@@ -1,5 +1,13 @@
+/*
+Tujuan: Menghasilkan PDF kwitansi pembayaran untuk order yang dapat diakses user.
+Caller: Tombol cetak kwitansi pada modul Incaso dan detail order.
+Dependensi: Session guard, RBAC global, query detail order, renderer PDF, dan audit.
+Main Functions: GET.
+Side Effects: Membaca database, menulis audit log, dan mengirim respons PDF.
+*/
+
 import { requireUser } from "@/lib/session";
-import { roleNameFromId } from "@/lib/roles";
+import { hasGlobalDataAccess, roleNameFromId } from "@/lib/roles";
 import { getOrderDetail } from "@/server/queries";
 import { renderKwitansiPdf } from "@/pdf/documents";
 import { totalItems } from "@/lib/pricing-calc";
@@ -13,7 +21,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const detail = await getOrderDetail(Number(id));
   if (!detail) return new Response("Order tidak ditemukan", { status: 404 });
   const o = detail.order;
-  if (roleNameFromId(user.roleId) !== "owner" && o.cabangId !== user.cabangId)
+  if (!hasGlobalDataAccess(roleNameFromId(user.roleId)) && o.cabangId !== user.cabangId)
     return new Response("Tidak berwenang", { status: 403 });
 
   const jumlah = detail.pembayaran?.jumlah ?? totalItems(o.items);
