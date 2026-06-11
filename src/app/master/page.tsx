@@ -3,6 +3,7 @@ import { DashboardShell } from "@/components/dashboard-shell";
 import { PageHeader } from "@/components/ui/page-header";
 import {
   listProdukAll,
+  listProdukSatuanAll,
   listCabangAll,
   listTokoAll,
   listHargaAll,
@@ -14,8 +15,9 @@ import { MasterDataTabs } from "@/components/master/master-client";
 
 export default async function MasterPage() {
   const user = await requireRole("owner");
-  const [produks, cabangs, tokos, harga, diskon, stok, users] = await Promise.all([
+  const [produks, produkSatuans, cabangs, tokos, harga, diskon, stok, users] = await Promise.all([
     listProdukAll(),
+    listProdukSatuanAll(),
     listCabangAll(),
     listTokoAll(),
     listHargaAll(),
@@ -32,6 +34,7 @@ export default async function MasterPage() {
       />
       <MasterDataTabs
         produks={produks}
+        produkSatuans={produkSatuans}
         cabangs={cabangs}
         tokos={tokos}
         harga={harga}

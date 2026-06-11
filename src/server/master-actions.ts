@@ -13,6 +13,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   produk,
+  produkSatuan,
   cabang,
   toko,
   hargaCabang,
@@ -44,13 +45,22 @@ export async function upsertProduk(input: {
   id?: number;
   nama: string;
   sku: string;
-  satuan: string;
+  satuans: { satuan: string; isDefault: boolean }[];
   initialStocks?: { cabangId: number; qty: number }[];
 }): Promise<Result> {
   const a = await ownerActor();
   if ("error" in a) return { ok: false, error: a.error };
-  if (!input.nama.trim() || !input.sku.trim() || !input.satuan.trim())
-    return { ok: false, error: "Nama, SKU, dan satuan wajib diisi." };
+  if (!input.nama.trim() || !input.sku.trim())
+    return { ok: false, error: "Nama dan SKU wajib diisi." };
+  if (!input.satuans.length)
+    return { ok: false, error: "Minimal 1 satuan wajib diisi." };
+  const filledSatuans = input.satuans.filter((s) => s.satuan.trim());
+  if (!filledSatuans.length)
+    return { ok: false, error: "Satuan tidak boleh kosong." };
+  if (filledSatuans.filter((s) => s.isDefault).length !== 1)
+    return { ok: false, error: "Tepat 1 satuan harus dipilih sebagai default." };
+
+  const defaultSatuan = filledSatuans.find((s) => s.isDefault)!.satuan.trim();
 
   const stocks = (input.initialStocks ?? []).filter((s) => s.qty > 0);
   if (stocks.some((s) => !Number.isFinite(s.qty) || s.qty < 0))
@@ -64,15 +74,35 @@ export async function upsertProduk(input: {
       if (isUpdate) {
         await tx
           .update(produk)
-          .set({ nama: input.nama.trim(), sku: input.sku.trim(), satuan: input.satuan.trim() })
+          .set({ nama: input.nama.trim(), sku: input.sku.trim(), satuan: defaultSatuan })
           .where(eq(produk.id, input.id!));
+
+        // Upsert satuans: add new ones, update isDefault for existing ones. No delete (FK safety).
+        const existing = await tx
+          .select({ id: produkSatuan.id, satuan: produkSatuan.satuan })
+          .from(produkSatuan)
+          .where(eq(produkSatuan.produkId, input.id!));
+        const existingMap = new Map(existing.map((e) => [e.satuan.toLowerCase(), e.id]));
+
+        for (const s of filledSatuans) {
+          const key = s.satuan.trim().toLowerCase();
+          const existId = existingMap.get(key);
+          if (existId) {
+            await tx.update(produkSatuan).set({ isDefault: s.isDefault }).where(eq(produkSatuan.id, existId));
+          } else {
+            await tx.insert(produkSatuan).values({ produkId: input.id!, satuan: s.satuan.trim(), isDefault: s.isDefault });
+          }
+        }
       } else {
         const [created] = await tx
           .insert(produk)
-          .values({ nama: input.nama.trim(), sku: input.sku.trim(), satuan: input.satuan.trim() })
+          .values({ nama: input.nama.trim(), sku: input.sku.trim(), satuan: defaultSatuan })
           .returning({ id: produk.id });
 
-        // Inject initial stock per cabang — API guard + DB CHECK as double safety.
+        for (const s of filledSatuans) {
+          await tx.insert(produkSatuan).values({ produkId: created.id, satuan: s.satuan.trim(), isDefault: s.isDefault });
+        }
+
         for (const s of stocks) {
           await tx.insert(stokCabang).values({ produkId: created.id, cabangId: s.cabangId, qty: s.qty });
           await tx.insert(kartuStok).values({
@@ -98,6 +128,7 @@ export async function upsertProduk(input: {
         newValue: JSON.stringify({
           op: isUpdate ? "update" : "create",
           sku: input.sku,
+          satuans: filledSatuans.length,
           stockEntries: stocks.length,
         }),
         timestamp: now,

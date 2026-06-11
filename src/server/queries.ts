@@ -8,6 +8,7 @@ import {
   user,
   role,
   produk,
+  produkSatuan,
   hargaCabang,
   diskonToko,
   pembayaran,
@@ -51,10 +52,11 @@ async function assemble(rows: OrderRow[]): Promise<OrderView[]> {
       diskonRupiah: orderItem.diskonRupiahApplied,
       nama: produk.nama,
       sku: produk.sku,
-      satuan: produk.satuan,
+      satuan: sql<string>`COALESCE(${produkSatuan.satuan}, ${produk.satuan})`.as("satuan"),
     })
     .from(orderItem)
     .innerJoin(produk, eq(orderItem.produkId, produk.id))
+    .leftJoin(produkSatuan, eq(orderItem.satuanId, produkSatuan.id))
     .where(inArray(orderItem.orderId, ids));
 
   const byOrder = new Map<number, OrderView["items"]>();
@@ -244,6 +246,32 @@ export async function masterForOrderEntry(cabangId: number) {
     )
     .orderBy(produk.nama);
 
+  const produkIds = produks.map((p) => p.id);
+  const allSatuans = produkIds.length
+    ? await db
+        .select({
+          produkId: produkSatuan.produkId,
+          id: produkSatuan.id,
+          satuan: produkSatuan.satuan,
+          isDefault: produkSatuan.isDefault,
+        })
+        .from(produkSatuan)
+        .where(inArray(produkSatuan.produkId, produkIds))
+        .orderBy(produkSatuan.isDefault, produkSatuan.id)
+    : [];
+
+  const satuanByProduk = new Map<number, { id: number; satuan: string; isDefault: boolean }[]>();
+  for (const s of allSatuans) {
+    const arr = satuanByProduk.get(s.produkId) ?? [];
+    arr.push({ id: s.id, satuan: s.satuan, isDefault: s.isDefault });
+    satuanByProduk.set(s.produkId, arr);
+  }
+
+  const produksWithSatuans = produks.map((p) => ({
+    ...p,
+    satuans: satuanByProduk.get(p.id) ?? [{ id: 0, satuan: p.satuan, isDefault: true }],
+  }));
+
   const tokoIds = tokos.map((t) => t.id);
   const diskon = tokoIds.length
     ? await db
@@ -259,7 +287,7 @@ export async function masterForOrderEntry(cabangId: number) {
         .where(inArray(diskonToko.tokoId, tokoIds))
     : [];
 
-  return { tokos, produks, diskon };
+  return { tokos, produks: produksWithSatuans, diskon };
 }
 
 export async function namaCabang(id: number): Promise<string> {
@@ -455,6 +483,18 @@ export async function listKartuStok(produkId: number, cabangId: number) {
     .where(and(eq(kartuStok.produkId, produkId), eq(kartuStok.cabangId, cabangId)))
     .orderBy(desc(kartuStok.createdAt))
     .limit(100);
+}
+
+export async function listProdukSatuanAll() {
+  return db
+    .select({
+      id: produkSatuan.id,
+      produkId: produkSatuan.produkId,
+      satuan: produkSatuan.satuan,
+      isDefault: produkSatuan.isDefault,
+    })
+    .from(produkSatuan)
+    .orderBy(produkSatuan.produkId, produkSatuan.isDefault, produkSatuan.id);
 }
 
 export async function listDiskonAll() {

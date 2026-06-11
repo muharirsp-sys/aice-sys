@@ -12,7 +12,8 @@ import { Combobox, type ComboOption } from "@/components/ui/combobox";
 import { Dialog } from "@/components/ui/dialog";
 
 type Toko = { id: number; nama: string };
-type Produk = { id: number; nama: string; satuan: string; harga: number };
+type ProdukSatuanOption = { id: number; satuan: string; isDefault: boolean };
+type Produk = { id: number; nama: string; satuan: string; harga: number; satuans: ProdukSatuanOption[] };
 type Diskon = {
   tokoId: number;
   produkId: number;
@@ -21,10 +22,10 @@ type Diskon = {
 };
 
 // qty: "" = belum diisi (memaksa sales mengetik), bukan default 1.
-type Line = { key: number; produkId: number; qty: number | ""; diskonPersen: number; diskonRupiah: number };
+type Line = { key: number; produkId: number; satuanId: number; qty: number | ""; diskonPersen: number; diskonRupiah: number };
 
 let seq = 1;
-const newLine = (): Line => ({ key: seq++, produkId: 0, qty: "", diskonPersen: 0, diskonRupiah: 0 });
+const newLine = (): Line => ({ key: seq++, produkId: 0, satuanId: 0, qty: "", diskonPersen: 0, diskonRupiah: 0 });
 
 export function OrderEntryForm({
   tokos,
@@ -58,7 +59,11 @@ export function OrderEntryForm({
 
   const hargaOf = (id: number) => produks.find((p) => p.id === id)?.harga ?? 0;
   const namaOf = (id: number) => produks.find((p) => p.id === id)?.nama ?? "";
-  const satuanOf = (id: number) => produks.find((p) => p.id === id)?.satuan ?? "—";
+  const satuansOf = (id: number) => produks.find((p) => p.id === id)?.satuans ?? [];
+  const defaultSatuanId = (id: number) => satuansOf(id).find((s) => s.isDefault)?.id ?? satuansOf(id)[0]?.id ?? 0;
+  const satuanLabelOf = (produkId: number, satuanId: number) =>
+    satuansOf(produkId).find((s) => s.id === satuanId)?.satuan ??
+    produks.find((p) => p.id === produkId)?.satuan ?? "—";
   const namaTokoOf = () => tokos.find((t) => t.id === tokoId)?.nama ?? "";
   const qtyNum = (q: number | "") => (typeof q === "number" ? q : 0);
   const caps = (pid: number) =>
@@ -85,9 +90,9 @@ export function OrderEntryForm({
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
     setMsg(null);
   }
-  // Baris belum lengkap: produk belum dipilih atau qty belum diisi (≥1).
+  // Baris belum lengkap: produk belum dipilih, satuan belum dipilih, atau qty belum diisi (≥1).
   function lineIncomplete(l: Line) {
-    return l.produkId === 0 || l.qty === "" || qtyNum(l.qty) < 1;
+    return l.produkId === 0 || l.satuanId === 0 || l.qty === "" || qtyNum(l.qty) < 1;
   }
   function lineInvalid(l: Line) {
     const c = caps(l.produkId);
@@ -102,7 +107,7 @@ export function OrderEntryForm({
     setMsg(null);
     setLines((ls) => {
       if (ls.some((l) => l.produkId === produkId)) return ls;
-      return [...ls, { key: seq++, produkId, qty: 1, diskonPersen: 0, diskonRupiah: 0 }];
+      return [...ls, { key: seq++, produkId, satuanId: defaultSatuanId(produkId), qty: 1, diskonPersen: 0, diskonRupiah: 0 }];
     });
   }
 
@@ -117,7 +122,7 @@ export function OrderEntryForm({
       const have = new Set(ls.map((l) => l.produkId));
       const add = valid
         .filter((it) => !have.has(it.produkId))
-        .map((it) => ({ key: seq++, produkId: it.produkId, qty: it.qty, diskonPersen: 0, diskonRupiah: 0 }));
+        .map((it) => ({ key: seq++, produkId: it.produkId, satuanId: defaultSatuanId(it.produkId), qty: it.qty, diskonPersen: 0, diskonRupiah: 0 }));
       return [...ls, ...add];
     });
   }
@@ -137,6 +142,7 @@ export function OrderEntryForm({
         tokoId,
         items: lines.map((l) => ({
           produkId: l.produkId,
+          satuanId: l.satuanId,
           qty: qtyNum(l.qty),
           diskonPersen: l.diskonPersen,
           diskonRupiah: l.diskonRupiah,
@@ -247,7 +253,7 @@ export function OrderEntryForm({
                 <Combobox
                   options={produkOpts}
                   value={l.produkId}
-                  onChange={(v) => update(l.key, { produkId: v })}
+                  onChange={(v) => update(l.key, { produkId: v, satuanId: defaultSatuanId(v) })}
                   placeholder="— Pilih Produk —"
                   searchPlaceholder="Cari nama produk..."
                   invalid={noProduk}
@@ -255,9 +261,21 @@ export function OrderEntryForm({
               </div>
               <div>
                 <label className={label}>Satuan</label>
-                <p className={`py-2 text-sm font-semibold tabular ${l.produkId > 0 ? "text-foreground" : "text-muted-foreground"}`}>
-                  {l.produkId > 0 ? satuanOf(l.produkId) : "—"}
-                </p>
+                {l.produkId > 0 && satuansOf(l.produkId).length > 1 ? (
+                  <select
+                    className={input}
+                    value={l.satuanId}
+                    onChange={(e) => update(l.key, { satuanId: Number(e.target.value) })}
+                  >
+                    {satuansOf(l.produkId).map((s) => (
+                      <option key={s.id} value={s.id}>{s.satuan}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className={`py-2 text-sm font-semibold tabular ${l.produkId > 0 ? "text-foreground" : "text-muted-foreground"}`}>
+                    {l.produkId > 0 ? satuansOf(l.produkId)[0]?.satuan ?? "—" : "—"}
+                  </p>
+                )}
               </div>
               <div>
                 <label className={label}>Qty</label>
@@ -337,7 +355,7 @@ export function OrderEntryForm({
           <p><span className="text-muted-foreground">Jumlah item:</span> <strong>{lines.length}</strong></p>
           {lines.map((l) => (
             <p key={l.key} className="pl-3 text-xs text-muted-foreground">
-              · {namaOf(l.produkId)} — {typeof l.qty === "number" ? l.qty : 0} {satuanOf(l.produkId)}
+              · {namaOf(l.produkId)} — {typeof l.qty === "number" ? l.qty : 0} {satuanLabelOf(l.produkId, l.satuanId)}
               {(l.diskonPersen > 0 || l.diskonRupiah > 0) && (
                 <span className="ml-1 text-primary">
                   (disk {l.diskonPersen > 0 ? `${l.diskonPersen}%` : ""}{l.diskonPersen > 0 && l.diskonRupiah > 0 ? "+" : ""}{l.diskonRupiah > 0 ? rupiah(l.diskonRupiah) : ""})

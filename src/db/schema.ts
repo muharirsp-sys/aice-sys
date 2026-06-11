@@ -116,6 +116,13 @@ export const order = sqliteTable("order", {
   isPickListed: integer("is_pick_listed", { mode: "boolean" }).notNull().default(false),
 }, (t) => [uniqueIndex("order_share_token_idx").on(t.shareToken)]);
 
+export const produkSatuan = sqliteTable("produk_satuan", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  produkId: integer("produk_id").notNull().references(() => produk.id),
+  satuan: text("satuan").notNull(),
+  isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+});
+
 export const orderItem = sqliteTable("order_item", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   orderId: integer("order_id")
@@ -124,6 +131,7 @@ export const orderItem = sqliteTable("order_item", {
   produkId: integer("produk_id")
     .notNull()
     .references(() => produk.id),
+  satuanId: integer("satuan_id").references(() => produkSatuan.id),
   qty: integer("qty").notNull(),
   hargaSatuan: integer("harga_satuan").notNull(),
   diskonPersenApplied: integer("diskon_persen_applied").notNull(),
@@ -354,3 +362,4 @@ export type Account = typeof account.$inferSelect;
 export type Verification = typeof verification.$inferSelect;
 export type StokCabang = typeof stokCabang.$inferSelect;
 export type KartuStok = typeof kartuStok.$inferSelect;
+export type ProdukSatuan = typeof produkSatuan.$inferSelect;

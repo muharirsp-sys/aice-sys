@@ -177,20 +177,25 @@ function Field({
 // ── Produk ────────────────────────────────────────────────────────────────────
 type Produk = { id: number; nama: string; sku: string; satuan: string };
 type StokEntry = { produkId: number; cabangId: number; qty: number; cabangNama: string };
+type ProdukSatuanRow = { id: number; produkId: number; satuan: string; isDefault: boolean };
+type SatuanDraft = { satuan: string; isDefault: boolean };
 
 function MasterProdukPanel({
   rows,
   cabangs,
   stok,
+  produkSatuans,
 }: {
   rows: Produk[];
   cabangs: { id: number; nama: string }[];
   stok: StokEntry[];
+  produkSatuans: ProdukSatuanRow[];
 }) {
   const { pending, err, setErr, run } = useSave();
   const [edit, setEdit] = useState<Produk | null>(null);
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ nama: "", sku: "", satuan: "" });
+  const [f, setF] = useState({ nama: "", sku: "" });
+  const [satuans, setSatuans] = useState<SatuanDraft[]>([{ satuan: "", isDefault: true }]);
   // initialStocks[cabangId] = qty — only used on CREATE
   const [initialStocks, setInitialStocks] = useState<Record<number, number>>({});
   const [search, setSearch] = useState("");
@@ -207,17 +212,46 @@ function MasterProdukPanel({
     return map;
   }, [stok]);
 
+  const satuansByProduk = useMemo(() => {
+    const map = new Map<number, ProdukSatuanRow[]>();
+    for (const s of produkSatuans) {
+      const arr = map.get(s.produkId) ?? [];
+      arr.push(s);
+      map.set(s.produkId, arr);
+    }
+    return map;
+  }, [produkSatuans]);
+
   function openForm(p?: Produk) {
     setErr(null);
     setEdit(p ?? null);
-    setF(p ? { nama: p.nama, sku: p.sku, satuan: p.satuan } : { nama: "", sku: "", satuan: "" });
-    // Reset initial stocks for new product
-    if (!p) {
+    setF(p ? { nama: p.nama, sku: p.sku } : { nama: "", sku: "" });
+    if (p) {
+      const existing = satuansByProduk.get(p.id);
+      setSatuans(
+        existing?.length
+          ? existing.map((s) => ({ satuan: s.satuan, isDefault: s.isDefault }))
+          : [{ satuan: p.satuan, isDefault: true }],
+      );
+    } else {
+      setSatuans([{ satuan: "", isDefault: true }]);
       const defaults: Record<number, number> = {};
       for (const c of cabangs) defaults[c.id] = 0;
       setInitialStocks(defaults);
     }
     setOpen(true);
+  }
+
+  function addSatuan() {
+    setSatuans((prev) => [...prev, { satuan: "", isDefault: false }]);
+  }
+
+  function updateSatuan(i: number, patch: Partial<SatuanDraft>) {
+    setSatuans((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
+  }
+
+  function setDefaultSatuan(i: number) {
+    setSatuans((prev) => prev.map((s, idx) => ({ ...s, isDefault: idx === i })));
   }
 
   const filtered = useMemo(() => {
@@ -240,7 +274,14 @@ function MasterProdukPanel({
   const cols: Column<Produk>[] = [
     { header: "Nama", cell: (r) => r.nama },
     { header: "SKU", cell: (r) => <span className="tabular">{r.sku}</span> },
-    { header: "Satuan", cell: (r) => r.satuan },
+    {
+      header: "Satuan",
+      cell: (r) => {
+        const ss = satuansByProduk.get(r.id);
+        if (!ss?.length) return r.satuan;
+        return ss.map((s) => s.satuan + (s.isDefault ? " ✓" : "")).join(" / ");
+      },
+    },
     {
       header: "Stok",
       cell: (r) => {
@@ -311,14 +352,39 @@ function MasterProdukPanel({
             onChange={(e) => setF({ ...f, sku: e.target.value })}
           />
         </Field>
-        <Field label="Satuan">
-          <input
-            className={input}
-            value={f.satuan}
-            onChange={(e) => setF({ ...f, satuan: e.target.value })}
-            placeholder="dus / karton / sak"
-          />
-        </Field>
+        <div className="mb-3">
+          <div className="mb-1.5 flex items-center justify-between">
+            <label className={label}>Satuan</label>
+            <button type="button" className={`${btn.ghost} text-xs`} onClick={addSatuan}>
+              <Plus className="size-3" /> Tambah
+            </button>
+          </div>
+          <div className="space-y-2">
+            {satuans.map((s, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  className={`${input} flex-1`}
+                  value={s.satuan}
+                  onChange={(e) => updateSatuan(i, { satuan: e.target.value })}
+                  placeholder="dus / karton / pcs"
+                />
+                <label className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap text-sm">
+                  <input
+                    type="radio"
+                    name="satuan-default"
+                    checked={s.isDefault}
+                    onChange={() => setDefaultSatuan(i)}
+                    className="accent-primary"
+                  />
+                  Default
+                </label>
+              </div>
+            ))}
+          </div>
+          {satuans.length > 1 && (
+            <p className="mt-1 text-xs text-muted-foreground">Pilih satu satuan sebagai default (tanda ✓ di tabel).</p>
+          )}
+        </div>
 
         {/* Stok awal — hanya tampil saat CREATE */}
         {!edit && cabangs.length > 0 && (
@@ -378,7 +444,7 @@ function MasterProdukPanel({
                   .map(([id, qty]) => ({ cabangId: Number(id), qty }))
                   .filter((s) => s.qty > 0);
             run(
-              () => upsertProduk({ id: edit?.id, ...f, initialStocks: stocks }),
+              () => upsertProduk({ id: edit?.id, ...f, satuans, initialStocks: stocks }),
               () => setOpen(false),
             );
           }}
@@ -1281,6 +1347,7 @@ function MasterUsersPanel({
 // ── Root export — Tabbed Master Page ─────────────────────────────────────────
 export function MasterDataTabs({
   produks,
+  produkSatuans,
   cabangs,
   tokos,
   harga,
@@ -1290,6 +1357,7 @@ export function MasterDataTabs({
   actorRoleId,
 }: {
   produks: Produk[];
+  produkSatuans: ProdukSatuanRow[];
   cabangs: Cabang[];
   tokos: TokoRow[];
   harga: HargaRow[];
@@ -1317,7 +1385,7 @@ export function MasterDataTabs({
         <MasterCabangPanel rows={cabangs} />
       </TabsContent>
       <TabsContent value="produk">
-        <MasterProdukPanel rows={produks} cabangs={cabangOpts} stok={stok} />
+        <MasterProdukPanel rows={produks} cabangs={cabangOpts} stok={stok} produkSatuans={produkSatuans} />
       </TabsContent>
       <TabsContent value="toko">
         <MasterTokoPanel rows={tokos} cabangs={cabangOpts} />

@@ -18,6 +18,7 @@ import {
   user,
   toko,
   produk,
+  produkSatuan,
   hargaCabang,
   diskonToko,
   account,
@@ -131,6 +132,16 @@ async function main() {
     { id: 3, nama: "Beras Pandan Wangi 5kg", sku: "BRS-PDN5", satuan: "sak" },
     { id: 4, nama: "Minyak Goreng 1L", sku: "MGR-1L", satuan: "karton" },
     { id: 5, nama: "Gula Pasir 1kg", sku: "GLA-1KG", satuan: "sak" },
+  ]);
+
+  // Multi-satuan: Indomie bisa per-dus dan per-pcs; yang lain satu satuan.
+  await db.insert(produkSatuan).values([
+    { produkId: 1, satuan: "dus", isDefault: true },
+    { produkId: 1, satuan: "pcs", isDefault: false },
+    { produkId: 2, satuan: "karton", isDefault: true },
+    { produkId: 3, satuan: "sak", isDefault: true },
+    { produkId: 4, satuan: "karton", isDefault: true },
+    { produkId: 5, satuan: "sak", isDefault: true },
   ]);
 
   const hargaRows = [];

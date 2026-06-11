@@ -74,7 +74,7 @@ async function loadOrder(
 // ── Sales: buat order (TANPA bukti) ──────────────────────────────────────────
 export async function createOrder(input: {
   tokoId: number;
-  items: LineInput[];
+  items: (LineInput & { satuanId: number })[];
 }): Promise<ActionResult> {
   const a = await actorWithRole("sales");
   if ("error" in a) return { ok: false, error: a.error };
@@ -113,9 +113,10 @@ export async function createOrder(input: {
     .returning({ id: order.id });
 
   await db.insert(orderItem).values(
-    priced.lines.map((l) => ({
+    priced.lines.map((l, i) => ({
       orderId: created.id,
       produkId: l.produkId,
+      satuanId: input.items[i].satuanId || null,
       qty: l.qty,
       hargaSatuan: l.hargaSatuan,
       diskonPersenApplied: l.diskonPersen,
