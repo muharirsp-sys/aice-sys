@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/session";
 import { hasGlobalDataAccess, roleNameFromId } from "@/lib/roles";
+import { writeAudit } from "./audit";
 
 export async function setActiveCabangAction(cabangId: number | null) {
   const user = await getCurrentUser();
@@ -17,5 +18,11 @@ export async function setActiveCabangAction(cabangId: number | null) {
       maxAge: 60 * 60 * 24 * 30,
     });
   }
+  await writeAudit({
+    userId: Number(user.id),
+    action: "switch_cabang",
+    table: "session",
+    newValue: { cabangId },
+  });
   revalidatePath("/owner");
 }
