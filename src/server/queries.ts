@@ -21,6 +21,7 @@ import {
   kartuStok,
   tandaTerima,
   tandaTerimaItem,
+  kendalaItem,
 } from "@/db/schema";
 import type { Alert, AlertLevel, OrderStatus, OrderView } from "@/lib/order-status";
 import { relativeTime } from "@/lib/format";
@@ -46,6 +47,7 @@ async function assemble(rows: OrderRow[]): Promise<OrderView[]> {
 
   const items = await db
     .select({
+      id: orderItem.id,
       orderId: orderItem.orderId,
       produkId: orderItem.produkId,
       qty: orderItem.qty,
@@ -65,6 +67,7 @@ async function assemble(rows: OrderRow[]): Promise<OrderView[]> {
   for (const it of items) {
     const arr = byOrder.get(it.orderId) ?? [];
     arr.push({
+      orderItemId: it.id,
       produkId: it.produkId,
       nama: it.nama,
       sku: it.sku,
@@ -623,6 +626,79 @@ export async function listAudit(limit = 150) {
     .innerJoin(user, eq(auditLog.userId, user.id))
     .orderBy(desc(auditLog.timestamp))
     .limit(limit);
+}
+
+// ── Kendala Item ─────────────────────────────────────────────────────────────
+
+// Order approved yang belum punya kendala 'dilaporkan'/'disesuaikan' untuk item yang sama.
+// Digunakan di panel lapor gudang sebagai sumber order yang bisa dilaporkan kendalanya.
+export async function listOrdersForKendala(cabangId: number): Promise<OrderView[]> {
+  const rows = await baseOrderSelect()
+    .where(and(eq(order.status, "approved"), eq(order.cabangId, cabangId)))
+    .orderBy(desc(order.id))
+    .limit(30);
+  return assemble(rows);
+}
+
+// Order dengan kendala 'dilaporkan' yang perlu di-adjust oleh driver.
+export async function listKendalaForDriver(cabangId: number) {
+  return db
+    .select({
+      id: kendalaItem.id,
+      orderId: kendalaItem.orderId,
+      orderItemId: kendalaItem.orderItemId,
+      qtyOrder: kendalaItem.qtyOrder,
+      qtyLapor: kendalaItem.qtyLapor,
+      status: kendalaItem.status,
+      catatanGudang: kendalaItem.catatanGudang,
+      produkNama: produk.nama,
+      satuan: produk.satuan,
+      tokoNama: toko.nama,
+      createdAt: kendalaItem.createdAt,
+    })
+    .from(kendalaItem)
+    .innerJoin(orderItem, eq(kendalaItem.orderItemId, orderItem.id))
+    .innerJoin(produk, eq(orderItem.produkId, produk.id))
+    .innerJoin(order, eq(kendalaItem.orderId, order.id))
+    .innerJoin(toko, eq(order.tokoId, toko.id))
+    .where(and(eq(kendalaItem.cabangId, cabangId), eq(kendalaItem.status, "dilaporkan")))
+    .orderBy(desc(kendalaItem.createdAt));
+}
+
+// Kendala berstatus 'dilaporkan'/'disesuaikan' — untuk approval owner.
+export async function listKendalaForOwner(cabangId: number | null) {
+  const conds = [
+    inArray(kendalaItem.status, ["dilaporkan", "disesuaikan"]),
+  ];
+  if (cabangId != null) conds.push(eq(kendalaItem.cabangId, cabangId));
+
+  return db
+    .select({
+      id: kendalaItem.id,
+      orderId: kendalaItem.orderId,
+      orderItemId: kendalaItem.orderItemId,
+      qtyOrder: kendalaItem.qtyOrder,
+      qtyLapor: kendalaItem.qtyLapor,
+      qtyDriver: kendalaItem.qtyDriver,
+      status: kendalaItem.status,
+      catatanGudang: kendalaItem.catatanGudang,
+      catatanDriver: kendalaItem.catatanDriver,
+      produkNama: produk.nama,
+      satuan: produk.satuan,
+      tokoNama: toko.nama,
+      cabangNama: cabang.nama,
+      gudangNama: user.nama,
+      createdAt: kendalaItem.createdAt,
+    })
+    .from(kendalaItem)
+    .innerJoin(orderItem, eq(kendalaItem.orderItemId, orderItem.id))
+    .innerJoin(produk, eq(orderItem.produkId, produk.id))
+    .innerJoin(order, eq(kendalaItem.orderId, order.id))
+    .innerJoin(toko, eq(order.tokoId, toko.id))
+    .innerJoin(cabang, eq(kendalaItem.cabangId, cabang.id))
+    .innerJoin(user, eq(kendalaItem.gudangUserId, user.id))
+    .where(and(...conds))
+    .orderBy(desc(kendalaItem.createdAt));
 }
 
 // ── Daily Closing ─────────────────────────────────────────────────────────────

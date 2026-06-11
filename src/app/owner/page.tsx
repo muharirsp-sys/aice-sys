@@ -4,8 +4,9 @@ import { DashboardShell } from "@/components/dashboard-shell";
 import { PageHeader } from "@/components/ui/page-header";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { TrafficLightList } from "@/components/ui/traffic-light-list";
+import { KendalaApprovalPanel } from "@/components/owner/kendala-approval-panel";
 import { rupiah } from "@/lib/format";
-import { ownerDashboard, listCabangAll } from "@/server/queries";
+import { ownerDashboard, listCabangAll, listKendalaForOwner } from "@/server/queries";
 import { deltaPersenOf } from "@/lib/pricing-calc";
 import type { AlertLevel } from "@/lib/order-status";
 
@@ -18,9 +19,10 @@ const DOT: Record<AlertLevel, string> = {
 export default async function OwnerDashboard() {
   const user = await requireRole("owner");
   const effectiveCabangId = await getEffectiveCabangId(user);
-  const [d, cabangs] = await Promise.all([
+  const [d, cabangs, kendalaItems] = await Promise.all([
     ownerDashboard(effectiveCabangId),
     listCabangAll(),
+    listKendalaForOwner(effectiveCabangId),
   ]);
   const delta = deltaPersenOf(d.pendapatanHariIni, d.pendapatanKemarin);
   const cabangLabel = effectiveCabangId
@@ -78,6 +80,15 @@ export default async function OwnerDashboard() {
           </div>
         </section>
       </div>
+
+      {kendalaItems.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Persetujuan Kendala Barang ({kendalaItems.length})
+          </h2>
+          <KendalaApprovalPanel items={kendalaItems} />
+        </section>
+      )}
 
       <section className="mt-8">
         <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">

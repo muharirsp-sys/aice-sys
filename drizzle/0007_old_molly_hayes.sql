@@ -1,0 +1,23 @@
+CREATE TABLE `kendala_item` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`order_id` integer NOT NULL,
+	`order_item_id` integer NOT NULL,
+	`cabang_id` integer NOT NULL,
+	`qty_order` integer NOT NULL,
+	`qty_lapor` integer NOT NULL,
+	`qty_driver` integer,
+	`status` text DEFAULT 'dilaporkan' NOT NULL,
+	`catatan_gudang` text,
+	`catatan_driver` text,
+	`catatan_owner` text,
+	`gudang_user_id` integer NOT NULL,
+	`driver_user_id` integer,
+	`owner_user_id` integer,
+	`created_at` integer NOT NULL,
+	FOREIGN KEY (`order_id`) REFERENCES `order`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`order_item_id`) REFERENCES `order_item`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`cabang_id`) REFERENCES `cabang`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`gudang_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`driver_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`owner_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
+);

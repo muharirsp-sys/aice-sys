@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { GudangList } from "@/components/gudang/gudang-list";
 import { CetakMassalPanel } from "@/components/gudang/cetak-massal-panel";
 import { TandaTerimaGudangPanel } from "@/components/gudang/tanda-terima-gudang-panel";
+import { KendalaLaporPanel } from "@/components/gudang/kendala-lapor-panel";
 import { GudangMuatanPanel, type GudangTripView } from "@/components/kanvas/gudang-muatan-panel";
 import { btn } from "@/lib/ui";
 import {
@@ -13,17 +14,19 @@ import {
   listUnPickListedApproved,
   listPendingTandaTerimaForGudang,
   getTandaTerimaItems,
+  listOrdersForKendala,
 } from "@/server/queries";
 import { getTripDetail, listTripsForGudang } from "@/server/kanvas-queries";
 
 export default async function GudangPage() {
   const user = await requireRole("gudang");
-  const [approved, tripRows, unprinted, unpicklisted, rawPendingTTs] = await Promise.all([
+  const [approved, tripRows, unprinted, unpicklisted, rawPendingTTs, ordersForKendala] = await Promise.all([
     listOrdersByStatus(["approved"], user.cabangId),
     listTripsForGudang(user.cabangId),
     listUnprintedApproved(user.cabangId),
     listUnPickListedApproved(user.cabangId),
     listPendingTandaTerimaForGudang(user.cabangId),
+    listOrdersForKendala(user.cabangId),
   ]);
 
   // Fetch items for each pending TT and serialize dates
@@ -84,6 +87,15 @@ export default async function GudangPage() {
 
       <CetakMassalPanel unprinted={unprinted} />
       <GudangList orders={approved} />
+
+      {ordersForKendala.length > 0 && (
+        <section className="mt-8">
+          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Lapor Kendala Barang
+          </h2>
+          <KendalaLaporPanel orders={ordersForKendala} />
+        </section>
+      )}
 
       <section className="mt-8">
         <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">

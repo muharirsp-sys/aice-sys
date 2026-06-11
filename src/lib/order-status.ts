@@ -37,6 +37,7 @@ export type Alert = {
 
 // ── View-model yang dikembalikan query untuk komponen UI ─────────────────────
 export type ItemView = {
+  orderItemId: number;
   produkId: number;
   nama: string;
   sku: string;

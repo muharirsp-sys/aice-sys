@@ -361,6 +361,29 @@ export const verification = sqliteTable("verification", {
     .$defaultFn(() => new Date()),
 });
 
+// ── Kendala Item ─────────────────────────────────────────────────────────────
+// Gudang melaporkan item yang stoknya kurang saat packing.
+// Driver menyesuaikan qty yang benar-benar diterima toko.
+// Owner menyetujui → order_item.qty diupdate → nota recalculates.
+
+export const kendalaItem = sqliteTable("kendala_item", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  orderId: integer("order_id").notNull().references(() => order.id),
+  orderItemId: integer("order_item_id").notNull().references(() => orderItem.id),
+  cabangId: integer("cabang_id").notNull().references(() => cabang.id),
+  qtyOrder: integer("qty_order").notNull(),   // snapshot qty original
+  qtyLapor: integer("qty_lapor").notNull(),   // gudang: qty yg bisa dikirim
+  qtyDriver: integer("qty_driver"),           // driver: qty yg benar-benar diterima toko
+  status: text("status").notNull().default("dilaporkan"), // dilaporkan | disesuaikan | disetujui | ditolak
+  catatanGudang: text("catatan_gudang"),
+  catatanDriver: text("catatan_driver"),
+  catatanOwner: text("catatan_owner"),
+  gudangUserId: integer("gudang_user_id").notNull().references(() => user.id),
+  driverUserId: integer("driver_user_id").references(() => user.id),
+  ownerUserId: integer("owner_user_id").references(() => user.id),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
 // Tipe inferensi (TS-level, bukan perubahan skema DB).
 export type Cabang = typeof cabang.$inferSelect;
 export type Role = typeof role.$inferSelect;
@@ -387,3 +410,4 @@ export type KartuStok = typeof kartuStok.$inferSelect;
 export type ProdukSatuan = typeof produkSatuan.$inferSelect;
 export type TandaTerima = typeof tandaTerima.$inferSelect;
 export type TandaTerimaItem = typeof tandaTerimaItem.$inferSelect;
+export type KendalaItem = typeof kendalaItem.$inferSelect;
