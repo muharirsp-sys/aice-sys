@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `order_share_token_idx` ON `order` (`share_token`);

@@ -47,6 +47,8 @@ export type ItemView = {
   diskonRupiah: number;
 };
 
+export type OrderTipe = "taking_order" | "kanvas";
+
 export type OrderView = {
   id: number;
   tokoId: number;
@@ -57,5 +59,6 @@ export type OrderView = {
   cabangNama: string;
   tanggal: string; // ISO
   status: OrderStatus;
+  tipe: OrderTipe;
   items: ItemView[];
 };

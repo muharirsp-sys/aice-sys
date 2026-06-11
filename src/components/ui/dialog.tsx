@@ -4,15 +4,24 @@ import { useEffect } from "react";
 import { X } from "lucide-react";
 
 // Dialog ringan (overlay + kartu). Elevasi shadow halus hanya untuk overlay (§8.4).
+const SIZE = {
+  sm: "max-w-md",
+  lg: "max-w-2xl",
+  // Lebar untuk tampilan side-by-side (bukti vs angka sistem).
+  xl: "max-w-5xl",
+} as const;
+
 export function Dialog({
   open,
   onClose,
   title,
+  size = "sm",
   children,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
+  size?: keyof typeof SIZE;
   children: React.ReactNode;
 }) {
   useEffect(() => {
@@ -34,7 +43,7 @@ export function Dialog({
         aria-modal="true"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-t-lg border bg-popover p-5 shadow-lg sm:rounded-lg"
+        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-lg border bg-popover p-5 shadow-lg sm:rounded-lg ${SIZE[size]}`}
       >
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="font-display text-lg font-bold tracking-tight">{title}</h2>

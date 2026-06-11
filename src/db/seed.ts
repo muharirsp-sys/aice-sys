@@ -31,6 +31,8 @@ import {
   issue,
   auditLog,
   dailyClosing,
+  tripKanvas,
+  tripItem,
 } from "./schema";
 
 const devPassword = "password123";
@@ -78,6 +80,9 @@ async function main() {
   await db.delete(pembayaran);
   await db.delete(issue);
   await db.delete(order);
+  // Modul Kanvas: trip_item -> trip_kanvas (anak dulu). order.trip_id sudah dihapus di atas.
+  await db.delete(tripItem);
+  await db.delete(tripKanvas);
   await db.delete(diskonToko);
   await db.delete(hargaCabang);
   await db.delete(toko);

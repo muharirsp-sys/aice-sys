@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Search, X, Trash2 } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { DataTable, type Column } from "@/components/ui/data-table";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { btn, input, label } from "@/lib/ui";
 import { rupiah } from "@/lib/format";
 import {
@@ -14,6 +15,9 @@ import {
   upsertHarga,
   upsertDiskon,
 } from "@/server/master-actions";
+import { createUser, updateUser, deleteUser } from "@/server/user-actions";
+
+const PAGE_SIZE = 20;
 
 type Result = { ok: boolean; error?: string };
 
@@ -35,27 +39,123 @@ function useSave() {
   return { pending, err, setErr, run };
 }
 
-function SectionShell({
+// ── Shared primitives ─────────────────────────────────────────────────────────
+
+function TableHeader({
   title,
   onAdd,
-  children,
+  search,
+  onSearch,
+  searchPlaceholder = "Cari...",
+  filterSlot,
 }: {
   title: string;
   onAdd: () => void;
-  children: React.ReactNode;
+  search: string;
+  onSearch: (v: string) => void;
+  searchPlaceholder?: string;
+  filterSlot?: React.ReactNode;
 }) {
   return (
-    <section>
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          {title}
-        </h2>
-        <button className={btn.outline} onClick={onAdd}>
+    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <h2 className="font-display text-base font-semibold">{title}</h2>
+      <div className="flex flex-1 flex-wrap items-center gap-2 sm:justify-end">
+        {/* Search */}
+        <div className="relative flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="search"
+            placeholder={searchPlaceholder}
+            value={search}
+            onChange={(e) => onSearch(e.target.value)}
+            className={`${input} pl-8 pr-8`}
+          />
+          {search && (
+            <button
+              onClick={() => onSearch("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Hapus pencarian"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+        {/* Optional filter slot */}
+        {filterSlot}
+        {/* Add button */}
+        <button className={btn.primary} onClick={onAdd}>
           <Plus className="size-4" /> Tambah
         </button>
       </div>
-      {children}
-    </section>
+    </div>
+  );
+}
+
+function Pagination({
+  page,
+  total,
+  pageSize,
+  onChange,
+}: {
+  page: number;
+  total: number;
+  pageSize: number;
+  onChange: (p: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (totalPages <= 1) return null;
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, total);
+  return (
+    <div className="mt-3 flex items-center justify-between text-sm text-muted-foreground">
+      <span>
+        {start}–{end} dari {total} data
+      </span>
+      <div className="flex gap-1">
+        <button
+          className={btn.outline}
+          disabled={page <= 1}
+          onClick={() => onChange(page - 1)}
+          aria-label="Halaman sebelumnya"
+        >
+          ‹
+        </button>
+        {Array.from({ length: totalPages }, (_, i) => i + 1)
+          .filter(
+            (p) =>
+              p === 1 || p === totalPages || (p >= page - 1 && p <= page + 1)
+          )
+          .reduce<(number | "…")[]>((acc, p, i, arr) => {
+            if (i > 0 && (arr[i - 1] as number) < p - 1) acc.push("…");
+            acc.push(p);
+            return acc;
+          }, [])
+          .map((p, i) =>
+            p === "…" ? (
+              <span key={`ellipsis-${i}`} className="px-1">
+                …
+              </span>
+            ) : (
+              <button
+                key={p}
+                className={`${p === page ? btn.primary : btn.outline} min-w-[2rem]`}
+                onClick={() => onChange(p as number)}
+                aria-current={p === page ? "page" : undefined}
+              >
+                {p}
+              </button>
+            )
+          )}
+        <button
+          className={btn.outline}
+          disabled={page >= totalPages}
+          onClick={() => onChange(page + 1)}
+          aria-label="Halaman berikutnya"
+        >
+          ›
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -74,191 +174,1165 @@ function Field({
   );
 }
 
-// ── Produk ───────────────────────────────────────────────────────────────────
+// ── Produk ────────────────────────────────────────────────────────────────────
 type Produk = { id: number; nama: string; sku: string; satuan: string };
-export function MasterProduk({ rows }: { rows: Produk[] }) {
+type StokEntry = { produkId: number; cabangId: number; qty: number; cabangNama: string };
+
+function MasterProdukPanel({
+  rows,
+  cabangs,
+  stok,
+}: {
+  rows: Produk[];
+  cabangs: { id: number; nama: string }[];
+  stok: StokEntry[];
+}) {
   const { pending, err, setErr, run } = useSave();
   const [edit, setEdit] = useState<Produk | null>(null);
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ nama: "", sku: "", satuan: "" });
+  // initialStocks[cabangId] = qty — only used on CREATE
+  const [initialStocks, setInitialStocks] = useState<Record<number, number>>({});
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+
+  // Stok per produk keyed by produkId → array of { cabangNama, qty }
+  const stokByProduk = useMemo(() => {
+    const map = new Map<number, { cabangNama: string; qty: number }[]>();
+    for (const s of stok) {
+      const arr = map.get(s.produkId) ?? [];
+      arr.push({ cabangNama: s.cabangNama, qty: s.qty });
+      map.set(s.produkId, arr);
+    }
+    return map;
+  }, [stok]);
 
   function openForm(p?: Produk) {
     setErr(null);
     setEdit(p ?? null);
     setF(p ? { nama: p.nama, sku: p.sku, satuan: p.satuan } : { nama: "", sku: "", satuan: "" });
+    // Reset initial stocks for new product
+    if (!p) {
+      const defaults: Record<number, number> = {};
+      for (const c of cabangs) defaults[c.id] = 0;
+      setInitialStocks(defaults);
+    }
     setOpen(true);
   }
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return rows.filter(
+      (r) =>
+        r.nama.toLowerCase().includes(q) ||
+        r.sku.toLowerCase().includes(q) ||
+        r.satuan.toLowerCase().includes(q)
+    );
+  }, [rows, search]);
+
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  function handleSearch(v: string) {
+    setSearch(v);
+    setPage(1);
+  }
+
   const cols: Column<Produk>[] = [
     { header: "Nama", cell: (r) => r.nama },
     { header: "SKU", cell: (r) => <span className="tabular">{r.sku}</span> },
     { header: "Satuan", cell: (r) => r.satuan },
-    { header: "", align: "right", cell: (r) => <button className={btn.ghost} onClick={() => openForm(r)}><Pencil className="size-4" /></button> },
+    {
+      header: "Stok",
+      cell: (r) => {
+        const entries = stokByProduk.get(r.id);
+        if (!entries?.length) return <span className="text-muted-foreground text-xs">—</span>;
+        return (
+          <span className="flex flex-wrap gap-1">
+            {entries.map((e) => (
+              <span
+                key={e.cabangNama}
+                className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-xs tabular"
+              >
+                {e.cabangNama}: <strong>{e.qty}</strong>
+              </span>
+            ))}
+          </span>
+        );
+      },
+    },
+    {
+      header: "",
+      align: "right",
+      cell: (r) => (
+        <button className={btn.ghost} onClick={() => openForm(r)}>
+          <Pencil className="size-4" />
+        </button>
+      ),
+    },
   ];
+
+  const currentStok = edit ? stokByProduk.get(edit.id) : undefined;
+
   return (
-    <SectionShell title="Produk" onAdd={() => openForm()}>
-      <DataTable columns={cols} rows={rows} getRowKey={(r) => r.id} />
-      <Dialog open={open} onClose={() => setOpen(false)} title={edit ? `Edit Produk` : "Produk Baru"}>
-        {err && <p className="mb-3 text-sm font-semibold text-critical">{err}</p>}
-        <Field label="Nama"><input className={input} value={f.nama} onChange={(e) => setF({ ...f, nama: e.target.value })} /></Field>
-        <Field label="SKU"><input className={input} value={f.sku} onChange={(e) => setF({ ...f, sku: e.target.value })} /></Field>
-        <Field label="Satuan"><input className={input} value={f.satuan} onChange={(e) => setF({ ...f, satuan: e.target.value })} placeholder="dus / karton / sak" /></Field>
-        <button className={btn.primary} disabled={pending} onClick={() => run(() => upsertProduk({ id: edit?.id, ...f }), () => setOpen(false))}>Simpan</button>
+    <>
+      <TableHeader
+        title="Master Produk"
+        onAdd={() => openForm()}
+        search={search}
+        onSearch={handleSearch}
+        searchPlaceholder="Cari nama / SKU..."
+      />
+      <DataTable columns={cols} rows={pageRows} getRowKey={(r) => r.id} />
+      <Pagination
+        page={page}
+        total={filtered.length}
+        pageSize={PAGE_SIZE}
+        onChange={setPage}
+      />
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title={edit ? "Edit Produk" : "Produk Baru"}
+      >
+        {err && (
+          <p className="mb-3 text-sm font-semibold text-critical">{err}</p>
+        )}
+        <Field label="Nama">
+          <input
+            className={input}
+            value={f.nama}
+            onChange={(e) => setF({ ...f, nama: e.target.value })}
+          />
+        </Field>
+        <Field label="SKU">
+          <input
+            className={input}
+            value={f.sku}
+            onChange={(e) => setF({ ...f, sku: e.target.value })}
+          />
+        </Field>
+        <Field label="Satuan">
+          <input
+            className={input}
+            value={f.satuan}
+            onChange={(e) => setF({ ...f, satuan: e.target.value })}
+            placeholder="dus / karton / sak"
+          />
+        </Field>
+
+        {/* Stok awal — hanya tampil saat CREATE */}
+        {!edit && cabangs.length > 0 && (
+          <div className="mb-3 rounded-md border border-border p-3">
+            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Stok Awal per Cabang
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {cabangs.map((c) => (
+                <div key={c.id}>
+                  <label className={`${label} text-xs`}>{c.nama}</label>
+                  <input
+                    type="number"
+                    min={0}
+                    className={`${input} tabular`}
+                    value={initialStocks[c.id] ?? 0}
+                    onChange={(e) =>
+                      setInitialStocks({ ...initialStocks, [c.id]: Math.max(0, Number(e.target.value)) })
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Stok saat ini — hanya tampil saat EDIT */}
+        {edit && (
+          <div className="mb-3 rounded-md border border-border p-3">
+            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Stok Saat Ini
+            </p>
+            {currentStok?.length ? (
+              <div className="flex flex-wrap gap-2">
+                {currentStok.map((e) => (
+                  <span
+                    key={e.cabangNama}
+                    className="inline-flex items-center gap-1 rounded bg-muted px-2 py-1 text-sm"
+                  >
+                    {e.cabangNama}:&nbsp;<strong className="tabular">{e.qty}</strong>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Belum ada data stok.</p>
+            )}
+          </div>
+        )}
+
+        <button
+          className={btn.primary}
+          disabled={pending}
+          onClick={() => {
+            const stocks = edit
+              ? undefined
+              : Object.entries(initialStocks)
+                  .map(([id, qty]) => ({ cabangId: Number(id), qty }))
+                  .filter((s) => s.qty > 0);
+            run(
+              () => upsertProduk({ id: edit?.id, ...f, initialStocks: stocks }),
+              () => setOpen(false),
+            );
+          }}
+        >
+          Simpan
+        </button>
       </Dialog>
-    </SectionShell>
+    </>
   );
 }
 
-// ── Cabang ───────────────────────────────────────────────────────────────────
+// ── Cabang ────────────────────────────────────────────────────────────────────
 type Cabang = { id: number; nama: string; alamat: string };
-export function MasterCabang({ rows }: { rows: Cabang[] }) {
+function MasterCabangPanel({ rows }: { rows: Cabang[] }) {
   const { pending, err, setErr, run } = useSave();
   const [edit, setEdit] = useState<Cabang | null>(null);
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ nama: "", alamat: "" });
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+
   function openForm(c?: Cabang) {
     setErr(null);
     setEdit(c ?? null);
     setF(c ? { nama: c.nama, alamat: c.alamat } : { nama: "", alamat: "" });
     setOpen(true);
   }
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return rows.filter(
+      (r) =>
+        r.nama.toLowerCase().includes(q) ||
+        r.alamat.toLowerCase().includes(q)
+    );
+  }, [rows, search]);
+
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  function handleSearch(v: string) {
+    setSearch(v);
+    setPage(1);
+  }
+
   const cols: Column<Cabang>[] = [
     { header: "Nama", cell: (r) => r.nama },
-    { header: "Alamat", cell: (r) => <span className="text-muted-foreground">{r.alamat}</span> },
-    { header: "", align: "right", cell: (r) => <button className={btn.ghost} onClick={() => openForm(r)}><Pencil className="size-4" /></button> },
+    {
+      header: "Alamat",
+      cell: (r) => (
+        <span className="text-muted-foreground">{r.alamat}</span>
+      ),
+    },
+    {
+      header: "",
+      align: "right",
+      cell: (r) => (
+        <button className={btn.ghost} onClick={() => openForm(r)}>
+          <Pencil className="size-4" />
+        </button>
+      ),
+    },
   ];
+
   return (
-    <SectionShell title="Cabang" onAdd={() => openForm()}>
-      <DataTable columns={cols} rows={rows} getRowKey={(r) => r.id} />
-      <Dialog open={open} onClose={() => setOpen(false)} title={edit ? "Edit Cabang" : "Cabang Baru"}>
-        {err && <p className="mb-3 text-sm font-semibold text-critical">{err}</p>}
-        <Field label="Nama"><input className={input} value={f.nama} onChange={(e) => setF({ ...f, nama: e.target.value })} /></Field>
-        <Field label="Alamat"><input className={input} value={f.alamat} onChange={(e) => setF({ ...f, alamat: e.target.value })} /></Field>
-        <button className={btn.primary} disabled={pending} onClick={() => run(() => upsertCabang({ id: edit?.id, ...f }), () => setOpen(false))}>Simpan</button>
+    <>
+      <TableHeader
+        title="Master Cabang"
+        onAdd={() => openForm()}
+        search={search}
+        onSearch={handleSearch}
+        searchPlaceholder="Cari nama / alamat..."
+      />
+      <DataTable columns={cols} rows={pageRows} getRowKey={(r) => r.id} />
+      <Pagination
+        page={page}
+        total={filtered.length}
+        pageSize={PAGE_SIZE}
+        onChange={setPage}
+      />
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title={edit ? "Edit Cabang" : "Cabang Baru"}
+      >
+        {err && (
+          <p className="mb-3 text-sm font-semibold text-critical">{err}</p>
+        )}
+        <Field label="Nama">
+          <input
+            className={input}
+            value={f.nama}
+            onChange={(e) => setF({ ...f, nama: e.target.value })}
+          />
+        </Field>
+        <Field label="Alamat">
+          <input
+            className={input}
+            value={f.alamat}
+            onChange={(e) => setF({ ...f, alamat: e.target.value })}
+          />
+        </Field>
+        <button
+          className={btn.primary}
+          disabled={pending}
+          onClick={() =>
+            run(
+              () => upsertCabang({ id: edit?.id, ...f }),
+              () => setOpen(false)
+            )
+          }
+        >
+          Simpan
+        </button>
       </Dialog>
-    </SectionShell>
+    </>
   );
 }
 
-// ── Toko ─────────────────────────────────────────────────────────────────────
-type TokoRow = { id: number; nama: string; alamat: string | null; noTelp: string | null; cabangId: number; cabangNama: string };
-export function MasterToko({ rows, cabangs }: { rows: TokoRow[]; cabangs: { id: number; nama: string }[] }) {
+// ── Toko ──────────────────────────────────────────────────────────────────────
+type TokoRow = {
+  id: number;
+  nama: string;
+  alamat: string | null;
+  noTelp: string | null;
+  cabangId: number;
+  cabangNama: string;
+};
+function MasterTokoPanel({
+  rows,
+  cabangs,
+}: {
+  rows: TokoRow[];
+  cabangs: { id: number; nama: string }[];
+}) {
   const { pending, err, setErr, run } = useSave();
   const [edit, setEdit] = useState<TokoRow | null>(null);
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ nama: "", alamat: "", noTelp: "", cabangId: cabangs[0]?.id ?? 0 });
+  const [f, setF] = useState({
+    nama: "",
+    alamat: "",
+    noTelp: "",
+    cabangId: cabangs[0]?.id ?? 0,
+  });
+  const [search, setSearch] = useState("");
+  const [filterCabang, setFilterCabang] = useState<number>(0);
+  const [page, setPage] = useState(1);
+
   function openForm(t?: TokoRow) {
     setErr(null);
     setEdit(t ?? null);
-    setF(t ? { nama: t.nama, alamat: t.alamat ?? "", noTelp: t.noTelp ?? "", cabangId: t.cabangId } : { nama: "", alamat: "", noTelp: "", cabangId: cabangs[0]?.id ?? 0 });
+    setF(
+      t
+        ? { nama: t.nama, alamat: t.alamat ?? "", noTelp: t.noTelp ?? "", cabangId: t.cabangId }
+        : { nama: "", alamat: "", noTelp: "", cabangId: cabangs[0]?.id ?? 0 }
+    );
     setOpen(true);
   }
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return rows.filter(
+      (r) =>
+        (filterCabang === 0 || r.cabangId === filterCabang) &&
+        (r.nama.toLowerCase().includes(q) ||
+          r.cabangNama.toLowerCase().includes(q) ||
+          (r.noTelp ?? "").toLowerCase().includes(q))
+    );
+  }, [rows, search, filterCabang]);
+
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  function handleSearch(v: string) {
+    setSearch(v);
+    setPage(1);
+  }
+  function handleFilterCabang(v: number) {
+    setFilterCabang(v);
+    setPage(1);
+  }
+
   const cols: Column<TokoRow>[] = [
-    { header: "Nama", cell: (r) => r.nama },
+    { header: "Nama Toko", cell: (r) => r.nama },
     { header: "Cabang", cell: (r) => r.cabangNama },
-    { header: "Telp", cell: (r) => <span className="tabular text-muted-foreground">{r.noTelp ?? "-"}</span> },
-    { header: "", align: "right", cell: (r) => <button className={btn.ghost} onClick={() => openForm(r)}><Pencil className="size-4" /></button> },
+    {
+      header: "Telp",
+      cell: (r) => (
+        <span className="tabular text-muted-foreground">{r.noTelp ?? "-"}</span>
+      ),
+    },
+    {
+      header: "",
+      align: "right",
+      cell: (r) => (
+        <button className={btn.ghost} onClick={() => openForm(r)}>
+          <Pencil className="size-4" />
+        </button>
+      ),
+    },
   ];
+
   return (
-    <SectionShell title="Toko" onAdd={() => openForm()}>
-      <DataTable columns={cols} rows={rows} getRowKey={(r) => r.id} />
-      <Dialog open={open} onClose={() => setOpen(false)} title={edit ? "Edit Toko" : "Toko Baru"}>
-        {err && <p className="mb-3 text-sm font-semibold text-critical">{err}</p>}
-        <Field label="Nama"><input className={input} value={f.nama} onChange={(e) => setF({ ...f, nama: e.target.value })} /></Field>
+    <>
+      <TableHeader
+        title="Master Toko"
+        onAdd={() => openForm()}
+        search={search}
+        onSearch={handleSearch}
+        searchPlaceholder="Cari nama toko..."
+        filterSlot={
+          <select
+            className={`${input} w-auto min-w-[140px]`}
+            value={filterCabang}
+            onChange={(e) => handleFilterCabang(Number(e.target.value))}
+            aria-label="Filter cabang"
+          >
+            <option value={0}>Semua Cabang</option>
+            {cabangs.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nama}
+              </option>
+            ))}
+          </select>
+        }
+      />
+      <DataTable columns={cols} rows={pageRows} getRowKey={(r) => r.id} />
+      <Pagination
+        page={page}
+        total={filtered.length}
+        pageSize={PAGE_SIZE}
+        onChange={setPage}
+      />
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title={edit ? "Edit Toko" : "Toko Baru"}
+      >
+        {err && (
+          <p className="mb-3 text-sm font-semibold text-critical">{err}</p>
+        )}
+        <Field label="Nama">
+          <input
+            className={input}
+            value={f.nama}
+            onChange={(e) => setF({ ...f, nama: e.target.value })}
+          />
+        </Field>
         <Field label="Cabang">
-          <select className={input} value={f.cabangId} onChange={(e) => setF({ ...f, cabangId: Number(e.target.value) })}>
-            {cabangs.map((c) => <option key={c.id} value={c.id}>{c.nama}</option>)}
+          <select
+            className={input}
+            value={f.cabangId}
+            onChange={(e) => setF({ ...f, cabangId: Number(e.target.value) })}
+          >
+            {cabangs.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nama}
+              </option>
+            ))}
           </select>
         </Field>
-        <Field label="Alamat"><input className={input} value={f.alamat} onChange={(e) => setF({ ...f, alamat: e.target.value })} /></Field>
-        <Field label="No. Telp"><input className={input} value={f.noTelp} onChange={(e) => setF({ ...f, noTelp: e.target.value })} /></Field>
-        <button className={btn.primary} disabled={pending} onClick={() => run(() => upsertToko({ id: edit?.id, ...f }), () => setOpen(false))}>Simpan</button>
+        <Field label="Alamat">
+          <input
+            className={input}
+            value={f.alamat}
+            onChange={(e) => setF({ ...f, alamat: e.target.value })}
+          />
+        </Field>
+        <Field label="No. Telp">
+          <input
+            className={input}
+            value={f.noTelp}
+            onChange={(e) => setF({ ...f, noTelp: e.target.value })}
+          />
+        </Field>
+        <button
+          className={btn.primary}
+          disabled={pending}
+          onClick={() =>
+            run(
+              () => upsertToko({ id: edit?.id, ...f }),
+              () => setOpen(false)
+            )
+          }
+        >
+          Simpan
+        </button>
       </Dialog>
-    </SectionShell>
+    </>
   );
 }
 
 // ── Harga Cabang ──────────────────────────────────────────────────────────────
-type HargaRow = { id: number; produkId: number; cabangId: number; harga: number; produkNama: string; cabangNama: string };
-export function MasterHarga({ rows, produks, cabangs }: { rows: HargaRow[]; produks: { id: number; nama: string }[]; cabangs: { id: number; nama: string }[] }) {
+type HargaRow = {
+  id: number;
+  produkId: number;
+  cabangId: number;
+  harga: number;
+  produkNama: string;
+  cabangNama: string;
+};
+function MasterHargaPanel({
+  rows,
+  produks,
+  cabangs,
+}: {
+  rows: HargaRow[];
+  produks: { id: number; nama: string }[];
+  cabangs: { id: number; nama: string }[];
+}) {
   const { pending, err, setErr, run } = useSave();
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ produkId: produks[0]?.id ?? 0, cabangId: cabangs[0]?.id ?? 0, harga: 0 });
+  const [f, setF] = useState({
+    produkId: produks[0]?.id ?? 0,
+    cabangId: cabangs[0]?.id ?? 0,
+    harga: 0,
+  });
+  const [search, setSearch] = useState("");
+  const [filterCabang, setFilterCabang] = useState<number>(0);
+  const [page, setPage] = useState(1);
+
   function openForm(r?: HargaRow) {
     setErr(null);
-    setF(r ? { produkId: r.produkId, cabangId: r.cabangId, harga: r.harga } : { produkId: produks[0]?.id ?? 0, cabangId: cabangs[0]?.id ?? 0, harga: 0 });
+    setF(
+      r
+        ? { produkId: r.produkId, cabangId: r.cabangId, harga: r.harga }
+        : { produkId: produks[0]?.id ?? 0, cabangId: cabangs[0]?.id ?? 0, harga: 0 }
+    );
     setOpen(true);
   }
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return rows.filter(
+      (r) =>
+        (filterCabang === 0 || r.cabangId === filterCabang) &&
+        (r.produkNama.toLowerCase().includes(q) ||
+          r.cabangNama.toLowerCase().includes(q))
+    );
+  }, [rows, search, filterCabang]);
+
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  function handleSearch(v: string) {
+    setSearch(v);
+    setPage(1);
+  }
+  function handleFilterCabang(v: number) {
+    setFilterCabang(v);
+    setPage(1);
+  }
+
   const cols: Column<HargaRow>[] = [
     { header: "Cabang", cell: (r) => r.cabangNama },
     { header: "Produk", cell: (r) => r.produkNama },
     { header: "Harga", align: "right", cell: (r) => rupiah(r.harga) },
-    { header: "", align: "right", cell: (r) => <button className={btn.ghost} onClick={() => openForm(r)}><Pencil className="size-4" /></button> },
+    {
+      header: "",
+      align: "right",
+      cell: (r) => (
+        <button className={btn.ghost} onClick={() => openForm(r)}>
+          <Pencil className="size-4" />
+        </button>
+      ),
+    },
   ];
+
   return (
-    <SectionShell title="Harga Dasar Cabang" onAdd={() => openForm()}>
-      <DataTable columns={cols} rows={rows} getRowKey={(r) => r.id} />
-      <Dialog open={open} onClose={() => setOpen(false)} title="Set Harga (per produk × cabang)">
-        {err && <p className="mb-3 text-sm font-semibold text-critical">{err}</p>}
+    <>
+      <TableHeader
+        title="Harga Dasar Cabang"
+        onAdd={() => openForm()}
+        search={search}
+        onSearch={handleSearch}
+        searchPlaceholder="Cari produk / cabang..."
+        filterSlot={
+          <select
+            className={`${input} w-auto min-w-[140px]`}
+            value={filterCabang}
+            onChange={(e) => handleFilterCabang(Number(e.target.value))}
+            aria-label="Filter cabang"
+          >
+            <option value={0}>Semua Cabang</option>
+            {cabangs.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nama}
+              </option>
+            ))}
+          </select>
+        }
+      />
+      <DataTable columns={cols} rows={pageRows} getRowKey={(r) => r.id} />
+      <Pagination
+        page={page}
+        total={filtered.length}
+        pageSize={PAGE_SIZE}
+        onChange={setPage}
+      />
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Set Harga (per produk × cabang)"
+      >
+        {err && (
+          <p className="mb-3 text-sm font-semibold text-critical">{err}</p>
+        )}
         <Field label="Produk">
-          <select className={input} value={f.produkId} onChange={(e) => setF({ ...f, produkId: Number(e.target.value) })}>
-            {produks.map((p) => <option key={p.id} value={p.id}>{p.nama}</option>)}
+          <select
+            className={input}
+            value={f.produkId}
+            onChange={(e) => setF({ ...f, produkId: Number(e.target.value) })}
+          >
+            {produks.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nama}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Cabang">
+          <select
+            className={input}
+            value={f.cabangId}
+            onChange={(e) => setF({ ...f, cabangId: Number(e.target.value) })}
+          >
+            {cabangs.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nama}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Harga (Rp)">
+          <input
+            type="number"
+            min={0}
+            className={`${input} tabular`}
+            value={f.harga}
+            onChange={(e) => setF({ ...f, harga: Number(e.target.value) })}
+          />
+        </Field>
+        <button
+          className={btn.primary}
+          disabled={pending}
+          onClick={() => run(() => upsertHarga(f), () => setOpen(false))}
+        >
+          Simpan
+        </button>
+      </Dialog>
+    </>
+  );
+}
+
+// ── Diskon Toko ───────────────────────────────────────────────────────────────
+type DiskonRow = {
+  id: number;
+  tokoId: number;
+  produkId: number;
+  diskonPersen: number;
+  diskonRupiah: number;
+  batasPersen: number;
+  batasRupiah: number;
+  tokoNama: string;
+  produkNama: string;
+};
+function MasterDiskonPanel({
+  rows,
+  tokos,
+  produks,
+}: {
+  rows: DiskonRow[];
+  tokos: { id: number; nama: string }[];
+  produks: { id: number; nama: string }[];
+}) {
+  const { pending, err, setErr, run } = useSave();
+  const [open, setOpen] = useState(false);
+  const empty = {
+    tokoId: tokos[0]?.id ?? 0,
+    produkId: produks[0]?.id ?? 0,
+    diskonPersen: 0,
+    diskonRupiah: 0,
+    batasPersen: 0,
+    batasRupiah: 0,
+  };
+  const [f, setF] = useState(empty);
+  const [search, setSearch] = useState("");
+  const [filterToko, setFilterToko] = useState<number>(0);
+  const [page, setPage] = useState(1);
+
+  function openForm(r?: DiskonRow) {
+    setErr(null);
+    setF(
+      r
+        ? {
+            tokoId: r.tokoId,
+            produkId: r.produkId,
+            diskonPersen: r.diskonPersen,
+            diskonRupiah: r.diskonRupiah,
+            batasPersen: r.batasPersen,
+            batasRupiah: r.batasRupiah,
+          }
+        : empty
+    );
+    setOpen(true);
+  }
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return rows.filter(
+      (r) =>
+        (filterToko === 0 || r.tokoId === filterToko) &&
+        (r.tokoNama.toLowerCase().includes(q) ||
+          r.produkNama.toLowerCase().includes(q))
+    );
+  }, [rows, search, filterToko]);
+
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  function handleSearch(v: string) {
+    setSearch(v);
+    setPage(1);
+  }
+  function handleFilterToko(v: number) {
+    setFilterToko(v);
+    setPage(1);
+  }
+
+  const setN = (k: keyof typeof empty, v: string) =>
+    setF({ ...f, [k]: Number(v) });
+
+  const cols: Column<DiskonRow>[] = [
+    { header: "Toko", cell: (r) => r.tokoNama },
+    { header: "Produk", cell: (r) => r.produkNama },
+    {
+      header: "Diskon",
+      align: "right",
+      cell: (r) => (
+        <span className="tabular">
+          {r.diskonPersen}% / {rupiah(r.diskonRupiah)}
+        </span>
+      ),
+    },
+    {
+      header: "Batas Maks",
+      align: "right",
+      cell: (r) => (
+        <span className="tabular text-muted-foreground">
+          {r.batasPersen}% / {rupiah(r.batasRupiah)}
+        </span>
+      ),
+    },
+    {
+      header: "",
+      align: "right",
+      cell: (r) => (
+        <button className={btn.ghost} onClick={() => openForm(r)}>
+          <Pencil className="size-4" />
+        </button>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <TableHeader
+        title="Diskon Khusus Toko"
+        onAdd={() => openForm()}
+        search={search}
+        onSearch={handleSearch}
+        searchPlaceholder="Cari toko / produk..."
+        filterSlot={
+          <select
+            className={`${input} w-auto min-w-[140px]`}
+            value={filterToko}
+            onChange={(e) => handleFilterToko(Number(e.target.value))}
+            aria-label="Filter toko"
+          >
+            <option value={0}>Semua Toko</option>
+            {tokos.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.nama}
+              </option>
+            ))}
+          </select>
+        }
+      />
+      <DataTable
+        columns={cols}
+        rows={pageRows}
+        getRowKey={(r) => r.id}
+        empty="Belum ada diskon khusus."
+      />
+      <Pagination
+        page={page}
+        total={filtered.length}
+        pageSize={PAGE_SIZE}
+        onChange={setPage}
+      />
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Set Diskon (per toko × produk)"
+      >
+        {err && (
+          <p className="mb-3 text-sm font-semibold text-critical">{err}</p>
+        )}
+        <Field label="Toko">
+          <select
+            className={input}
+            value={f.tokoId}
+            onChange={(e) => setN("tokoId", e.target.value)}
+          >
+            {tokos.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.nama}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Produk">
+          <select
+            className={input}
+            value={f.produkId}
+            onChange={(e) => setN("produkId", e.target.value)}
+          >
+            {produks.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nama}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Diskon %">
+            <input
+              type="number"
+              min={0}
+              className={`${input} tabular`}
+              value={f.diskonPersen}
+              onChange={(e) => setN("diskonPersen", e.target.value)}
+            />
+          </Field>
+          <Field label="Diskon Rp/unit">
+            <input
+              type="number"
+              min={0}
+              className={`${input} tabular`}
+              value={f.diskonRupiah}
+              onChange={(e) => setN("diskonRupiah", e.target.value)}
+            />
+          </Field>
+          <Field label="Batas %">
+            <input
+              type="number"
+              min={0}
+              className={`${input} tabular`}
+              value={f.batasPersen}
+              onChange={(e) => setN("batasPersen", e.target.value)}
+            />
+          </Field>
+          <Field label="Batas Rp/unit">
+            <input
+              type="number"
+              min={0}
+              className={`${input} tabular`}
+              value={f.batasRupiah}
+              onChange={(e) => setN("batasRupiah", e.target.value)}
+            />
+          </Field>
+        </div>
+        <button
+          className={btn.primary}
+          disabled={pending}
+          onClick={() => run(() => upsertDiskon(f), () => setOpen(false))}
+        >
+          Simpan
+        </button>
+      </Dialog>
+    </>
+  );
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+type UserRow = {
+  id: number;
+  nama: string;
+  email: string;
+  roleId: number;
+  roleName: string;
+  cabangId: number;
+  cabangNama: string;
+};
+
+const ROLE_OPTS = [
+  { id: 1, label: "Sales" },
+  { id: 2, label: "Admin Fakturist" },
+  { id: 3, label: "Gudang" },
+  { id: 4, label: "Delivery" },
+  { id: 5, label: "Incaso" },
+  { id: 6, label: "Owner" },
+  { id: 7, label: "Super Admin" },
+];
+
+function MasterUsersPanel({
+  rows,
+  cabangs,
+  actorRoleId,
+}: {
+  rows: UserRow[];
+  cabangs: { id: number; nama: string }[];
+  actorRoleId: number;
+}) {
+  const { pending, err, setErr, run } = useSave();
+  const [edit, setEdit] = useState<UserRow | null>(null);
+  const [open, setOpen] = useState(false);
+  const [delTarget, setDelTarget] = useState<UserRow | null>(null);
+  const [f, setF] = useState({
+    nama: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+    roleId: 1,
+    cabangId: cabangs[0]?.id ?? 0,
+  });
+  const [search, setSearch] = useState("");
+  const [filterRole, setFilterRole] = useState<number>(0);
+  const [page, setPage] = useState(1);
+
+  const allowedRoles = actorRoleId === 7 ? ROLE_OPTS : ROLE_OPTS.filter((r) => r.id <= 5);
+
+  function openForm(u?: UserRow) {
+    setErr(null);
+    setEdit(u ?? null);
+    setF(
+      u
+        ? { nama: u.nama, email: u.email, password: "", confirmPassword: "", roleId: u.roleId, cabangId: u.cabangId }
+        : { nama: "", email: "", password: "", confirmPassword: "", roleId: allowedRoles[0]?.id ?? 1, cabangId: cabangs[0]?.id ?? 0 }
+    );
+    setOpen(true);
+  }
+
+  function handleSave() {
+    if (!edit && !f.password) {
+      setErr("Password wajib diisi untuk user baru.");
+      return;
+    }
+    if (f.password && f.password !== f.confirmPassword) {
+      setErr("Konfirmasi password tidak cocok.");
+      return;
+    }
+    if (edit) {
+      run(
+        () => updateUser({ id: edit.id, nama: f.nama, email: f.email, roleId: f.roleId, cabangId: f.cabangId, password: f.password || undefined }),
+        () => setOpen(false)
+      );
+    } else {
+      run(
+        () => createUser({ nama: f.nama, email: f.email, password: f.password, roleId: f.roleId, cabangId: f.cabangId }),
+        () => setOpen(false)
+      );
+    }
+  }
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return rows.filter(
+      (r) =>
+        (filterRole === 0 || r.roleId === filterRole) &&
+        (r.nama.toLowerCase().includes(q) ||
+          r.email.toLowerCase().includes(q) ||
+          r.cabangNama.toLowerCase().includes(q))
+    );
+  }, [rows, search, filterRole]);
+
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  function handleSearch(v: string) {
+    setSearch(v);
+    setPage(1);
+  }
+
+  const cols: Column<UserRow>[] = [
+    { header: "Nama", cell: (r) => r.nama },
+    { header: "Email", cell: (r) => <span className="tabular text-sm">{r.email}</span> },
+    { header: "Role", cell: (r) => <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-xs font-medium">{r.roleName}</span> },
+    { header: "Cabang", cell: (r) => r.cabangNama },
+    {
+      header: "",
+      align: "right",
+      cell: (r) => (
+        <div className="flex justify-end gap-1">
+          <button className={btn.ghost} onClick={() => openForm(r)} aria-label="Edit">
+            <Pencil className="size-4" />
+          </button>
+          <button className={`${btn.ghost} text-critical hover:text-critical`} onClick={() => setDelTarget(r)} aria-label="Hapus">
+            <Trash2 className="size-4" />
+          </button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <TableHeader
+        title="Manajemen Pengguna"
+        onAdd={() => openForm()}
+        search={search}
+        onSearch={handleSearch}
+        searchPlaceholder="Cari nama / email..."
+        filterSlot={
+          <select
+            className={`${input} w-auto min-w-[140px]`}
+            value={filterRole}
+            onChange={(e) => { setFilterRole(Number(e.target.value)); setPage(1); }}
+            aria-label="Filter role"
+          >
+            <option value={0}>Semua Role</option>
+            {ROLE_OPTS.map((r) => (
+              <option key={r.id} value={r.id}>{r.label}</option>
+            ))}
+          </select>
+        }
+      />
+      <DataTable columns={cols} rows={pageRows} getRowKey={(r) => r.id} empty="Belum ada pengguna." />
+      <Pagination page={page} total={filtered.length} pageSize={PAGE_SIZE} onChange={setPage} />
+
+      {/* Create / Edit dialog */}
+      <Dialog open={open} onClose={() => setOpen(false)} title={edit ? "Edit Pengguna" : "Pengguna Baru"}>
+        {err && <p className="mb-3 text-sm font-semibold text-critical">{err}</p>}
+        <Field label="Nama">
+          <input className={input} value={f.nama} onChange={(e) => setF({ ...f, nama: e.target.value })} />
+        </Field>
+        <Field label="Email">
+          <input type="email" className={input} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+        </Field>
+        <Field label={edit ? "Password Baru (kosongkan jika tidak diubah)" : "Password"}>
+          <input
+            type="password"
+            className={input}
+            value={f.password}
+            onChange={(e) => setF({ ...f, password: e.target.value })}
+            placeholder="Min 8 karakter, 1 huruf kapital, 1 angka"
+          />
+        </Field>
+        {(f.password || !edit) && (
+          <Field label="Konfirmasi Password">
+            <input
+              type="password"
+              className={input}
+              value={f.confirmPassword}
+              onChange={(e) => setF({ ...f, confirmPassword: e.target.value })}
+            />
+          </Field>
+        )}
+        <Field label="Role">
+          <select className={input} value={f.roleId} onChange={(e) => setF({ ...f, roleId: Number(e.target.value) })}>
+            {allowedRoles.map((r) => (
+              <option key={r.id} value={r.id}>{r.label}</option>
+            ))}
           </select>
         </Field>
         <Field label="Cabang">
           <select className={input} value={f.cabangId} onChange={(e) => setF({ ...f, cabangId: Number(e.target.value) })}>
-            {cabangs.map((c) => <option key={c.id} value={c.id}>{c.nama}</option>)}
+            {cabangs.map((c) => (
+              <option key={c.id} value={c.id}>{c.nama}</option>
+            ))}
           </select>
         </Field>
-        <Field label="Harga (Rp)"><input type="number" min={0} className={`${input} tabular`} value={f.harga} onChange={(e) => setF({ ...f, harga: Number(e.target.value) })} /></Field>
-        <button className={btn.primary} disabled={pending} onClick={() => run(() => upsertHarga(f), () => setOpen(false))}>Simpan</button>
+        <button className={btn.primary} disabled={pending} onClick={handleSave}>
+          Simpan
+        </button>
       </Dialog>
-    </SectionShell>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={delTarget !== null} onClose={() => setDelTarget(null)} title="Hapus Pengguna">
+        {err && <p className="mb-3 text-sm font-semibold text-critical">{err}</p>}
+        <p className="mb-4 text-sm">
+          Hapus pengguna <strong>{delTarget?.nama}</strong> ({delTarget?.email})?
+          Tindakan ini tidak bisa dibatalkan.
+        </p>
+        <div className="flex gap-2">
+          <button
+            className={btn.danger}
+            disabled={pending}
+            onClick={() => {
+              if (!delTarget) return;
+              run(() => deleteUser(delTarget.id), () => setDelTarget(null));
+            }}
+          >
+            Hapus
+          </button>
+          <button className={btn.outline} onClick={() => setDelTarget(null)}>
+            Batal
+          </button>
+        </div>
+      </Dialog>
+    </>
   );
 }
 
-// ── Diskon Toko ──────────────────────────────────────────────────────────────
-type DiskonRow = { id: number; tokoId: number; produkId: number; diskonPersen: number; diskonRupiah: number; batasPersen: number; batasRupiah: number; tokoNama: string; produkNama: string };
-export function MasterDiskon({ rows, tokos, produks }: { rows: DiskonRow[]; tokos: { id: number; nama: string }[]; produks: { id: number; nama: string }[] }) {
-  const { pending, err, setErr, run } = useSave();
-  const [open, setOpen] = useState(false);
-  const empty = { tokoId: tokos[0]?.id ?? 0, produkId: produks[0]?.id ?? 0, diskonPersen: 0, diskonRupiah: 0, batasPersen: 0, batasRupiah: 0 };
-  const [f, setF] = useState(empty);
-  function openForm(r?: DiskonRow) {
-    setErr(null);
-    setF(r ? { tokoId: r.tokoId, produkId: r.produkId, diskonPersen: r.diskonPersen, diskonRupiah: r.diskonRupiah, batasPersen: r.batasPersen, batasRupiah: r.batasRupiah } : empty);
-    setOpen(true);
-  }
-  const cols: Column<DiskonRow>[] = [
-    { header: "Toko", cell: (r) => r.tokoNama },
-    { header: "Produk", cell: (r) => r.produkNama },
-    { header: "Diskon", align: "right", cell: (r) => <span className="tabular">{r.diskonPersen}% / {rupiah(r.diskonRupiah)}</span> },
-    { header: "Batas", align: "right", cell: (r) => <span className="tabular text-muted-foreground">{r.batasPersen}% / {rupiah(r.batasRupiah)}</span> },
-    { header: "", align: "right", cell: (r) => <button className={btn.ghost} onClick={() => openForm(r)}><Pencil className="size-4" /></button> },
-  ];
-  const setN = (k: keyof typeof empty, v: string) => setF({ ...f, [k]: Number(v) });
+// ── Root export — Tabbed Master Page ─────────────────────────────────────────
+export function MasterDataTabs({
+  produks,
+  cabangs,
+  tokos,
+  harga,
+  diskon,
+  stok,
+  users,
+  actorRoleId,
+}: {
+  produks: Produk[];
+  cabangs: Cabang[];
+  tokos: TokoRow[];
+  harga: HargaRow[];
+  diskon: DiskonRow[];
+  stok: StokEntry[];
+  users: UserRow[];
+  actorRoleId: number;
+}) {
+  const produkOpts = produks.map((p) => ({ id: p.id, nama: p.nama }));
+  const cabangOpts = cabangs.map((c) => ({ id: c.id, nama: c.nama }));
+  const tokoOpts = tokos.map((t) => ({ id: t.id, nama: t.nama }));
+
   return (
-    <SectionShell title="Diskon Khusus Toko" onAdd={() => openForm()}>
-      <DataTable columns={cols} rows={rows} getRowKey={(r) => r.id} empty="Belum ada diskon khusus." />
-      <Dialog open={open} onClose={() => setOpen(false)} title="Set Diskon (per toko × produk)">
-        {err && <p className="mb-3 text-sm font-semibold text-critical">{err}</p>}
-        <Field label="Toko">
-          <select className={input} value={f.tokoId} onChange={(e) => setN("tokoId", e.target.value)}>
-            {tokos.map((t) => <option key={t.id} value={t.id}>{t.nama}</option>)}
-          </select>
-        </Field>
-        <Field label="Produk">
-          <select className={input} value={f.produkId} onChange={(e) => setN("produkId", e.target.value)}>
-            {produks.map((p) => <option key={p.id} value={p.id}>{p.nama}</option>)}
-          </select>
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Diskon %"><input type="number" min={0} className={`${input} tabular`} value={f.diskonPersen} onChange={(e) => setN("diskonPersen", e.target.value)} /></Field>
-          <Field label="Diskon Rp/unit"><input type="number" min={0} className={`${input} tabular`} value={f.diskonRupiah} onChange={(e) => setN("diskonRupiah", e.target.value)} /></Field>
-          <Field label="Batas %"><input type="number" min={0} className={`${input} tabular`} value={f.batasPersen} onChange={(e) => setN("batasPersen", e.target.value)} /></Field>
-          <Field label="Batas Rp/unit"><input type="number" min={0} className={`${input} tabular`} value={f.batasRupiah} onChange={(e) => setN("batasRupiah", e.target.value)} /></Field>
-        </div>
-        <button className={btn.primary} disabled={pending} onClick={() => run(() => upsertDiskon(f), () => setOpen(false))}>Simpan</button>
-      </Dialog>
-    </SectionShell>
+    <Tabs defaultValue="produk">
+      <TabsList className="mb-6 w-full sm:w-auto">
+        <TabsTrigger value="cabang">Cabang</TabsTrigger>
+        <TabsTrigger value="produk">Produk</TabsTrigger>
+        <TabsTrigger value="toko">Toko</TabsTrigger>
+        <TabsTrigger value="harga">Harga Dasar</TabsTrigger>
+        <TabsTrigger value="diskon">Diskon Toko</TabsTrigger>
+        <TabsTrigger value="pengguna">Pengguna</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="cabang">
+        <MasterCabangPanel rows={cabangs} />
+      </TabsContent>
+      <TabsContent value="produk">
+        <MasterProdukPanel rows={produks} cabangs={cabangOpts} stok={stok} />
+      </TabsContent>
+      <TabsContent value="toko">
+        <MasterTokoPanel rows={tokos} cabangs={cabangOpts} />
+      </TabsContent>
+      <TabsContent value="harga">
+        <MasterHargaPanel rows={harga} produks={produkOpts} cabangs={cabangOpts} />
+      </TabsContent>
+      <TabsContent value="diskon">
+        <MasterDiskonPanel rows={diskon} tokos={tokoOpts} produks={produkOpts} />
+      </TabsContent>
+      <TabsContent value="pengguna">
+        <MasterUsersPanel rows={users} cabangs={cabangOpts} actorRoleId={actorRoleId} />
+      </TabsContent>
+    </Tabs>
   );
 }
+
+

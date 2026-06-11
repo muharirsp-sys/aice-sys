@@ -308,3 +308,11 @@ Tujuan: tampilan terasa **benar‑benar dirancang**, bukan default generik AI. D
 
 ## 9. Tech Stack
 *(lihat bagian di atas — diringkas: Next.js + Tailwind + shadcn/ui + SQLite/Drizzle + Better Auth + next‑pwa + @react‑pdf/renderer)*
+## 10. Modul Kanvas Luar Kota (Addendum)
+
+Di luar ER diagram §6, sistem memiliki modul kanvas luar kota:
+
+- **Trip kanvas** (`trip_kanvas`, `trip_item`): sales memuat barang sekali ke kendaraan, gudang mengonfirmasi muat, sales berkeliling beberapa hari, lalu gudang memverifikasi rekonsiliasi (muat = terjual + kembali). Status: `diajukan → berjalan → rekonsiliasi → selesai`.
+- **Faktur kanvas**: order dengan `tipe='kanvas'` terbit langsung di toko berstatus `delivered` tanpa approval admin. Kontrol pengganti: harga/diskon tervalidasi server (priceOrderLines) dan qty dibatasi sisa muatan trip.
+- **Kirim via WhatsApp**: faktur PDF dikirim dari HP sales (Web Share API; fallback link `wa.me` + URL publik ber-token `/f/[share_token]`). Tidak ada gateway WA server.
+- **Pembayaran**: tunai dicatat sales di tempat; tempo masuk antrean Incaso seperti order biasa.

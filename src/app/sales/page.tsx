@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { Truck } from "lucide-react";
 import { requireRole } from "@/lib/session";
+import { btn } from "@/lib/ui";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { PageHeader } from "@/components/ui/page-header";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -30,7 +32,11 @@ export default async function SalesPage() {
       <PageHeader
         title="Order Entry"
         desc="Buat pesanan toko — harga otomatis, diskon terbatas. Tanpa unggah bukti."
-      />
+      >
+        <Link href="/sales/kanvas" className={btn.outline}>
+          <Truck className="size-4" /> Kanvas Luar Kota
+        </Link>
+      </PageHeader>
       <OrderEntryForm tokos={master.tokos} produks={master.produks} diskon={master.diskon} />
 
       <section className="mt-8">

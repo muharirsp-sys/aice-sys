@@ -30,8 +30,9 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Lindungi semua rute kecuali aset statis, route handler auth, dan file publik.
+  // Lindungi semua rute kecuali aset statis, route handler auth, file publik,
+  // dan faktur publik ber-token (/f/[token] — dibuka toko dari link WhatsApp).
   matcher: [
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|manifest.webmanifest|icons|sw.js|offline).*)",
+    "/((?!api/auth|f/[^/]{20,}|_next/static|_next/image|favicon.ico|manifest.webmanifest|icons|sw.js|offline).*)",
   ],
 };

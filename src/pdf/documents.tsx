@@ -172,10 +172,15 @@ const orderMeta = (o: OrderView) => [
 
 // ── Faktur ───────────────────────────────────────────────────────────────────
 function FakturDoc({ o }: { o: OrderView }) {
+  const kanvas = o.tipe === "kanvas";
   return (
     <Document title={`Faktur INV-${o.id}`}>
       <Page size="A4" style={s.page}>
-        <Kop title="Faktur" docNo={`INV-${o.id}`} meta={orderMeta(o)} />
+        <Kop
+          title={kanvas ? "Faktur Kanvas" : "Faktur"}
+          docNo={`INV-${o.id}`}
+          meta={orderMeta(o)}
+        />
         <Text style={s.sectionTitle}>Rincian Barang</Text>
         <View style={s.table}>
           <View style={s.thead}>
@@ -202,7 +207,7 @@ function FakturDoc({ o }: { o: OrderView }) {
           </View>
         </View>
         <View style={s.signRow}>
-          <View style={s.signBox}><Text style={s.signLine}>Hormat kami (Fakturist)</Text></View>
+          <View style={s.signBox}><Text style={s.signLine}>{kanvas ? "Hormat kami (Sales Kanvas)" : "Hormat kami (Fakturist)"}</Text></View>
           <View style={s.signBox}><Text style={s.signLine}>Penerima (Toko)</Text></View>
         </View>
         <Footer />
@@ -341,6 +346,64 @@ function KwitansiDoc({ o, jumlah, metode }: { o: OrderView; jumlah: number; meto
   );
 }
 
+// ── Aggregate Pick List (Gudang — gabungan semua nota belum di-pick-list) ────
+function AggPickListDoc({ orders, cabangNama, tanggal }: { orders: OrderView[]; cabangNama: string; tanggal: string }) {
+  // Agregasi total qty per SKU dari seluruh nota.
+  const agg = new Map<string, { sku: string; nama: string; satuan: string; totalQty: number }>();
+  for (const o of orders)
+    for (const it of o.items) {
+      const cur = agg.get(it.sku) ?? { sku: it.sku, nama: it.nama, satuan: it.satuan, totalQty: 0 };
+      cur.totalQty += it.qty;
+      agg.set(it.sku, cur);
+    }
+  const baris = [...agg.values()].sort((a, b) => a.sku.localeCompare(b.sku));
+  const orderIds = orders.map((o) => `#${o.id}`).join(", ");
+
+  return (
+    <Document title={`Pick List Gabungan PLA-${tanggal}`}>
+      <Page size="A4" style={s.page}>
+        <Kop
+          title="Pick List Gabungan"
+          docNo={`PLA-${tanggal}`}
+          meta={[
+            { label: "Cabang", value: cabangNama },
+            { label: "Tanggal", value: tglPendek(`${tanggal}T00:00:00`) },
+            { label: "Jml Nota", value: String(orders.length) },
+            { label: "SKU Unik", value: String(baris.length) },
+          ]}
+        />
+        <Text style={s.sectionTitle}>Daftar Ambil Barang (Agregat)</Text>
+        <View style={s.table}>
+          <View style={s.thead}>
+            <Text style={[s.th, { flex: 2 }]}>SKU</Text>
+            <Text style={[s.th, { flex: 4 }]}>Produk</Text>
+            <Text style={[s.th, { flex: 1, textAlign: "right" }]}>Total Qty</Text>
+            <Text style={[s.th, { flex: 2 }]}>Satuan</Text>
+            <Text style={[s.th, { flex: 1, textAlign: "center" }]}>Ambil</Text>
+          </View>
+          {baris.map((b, idx) => (
+            <View key={b.sku} style={idx % 2 ? s.trZebra : s.tr}>
+              <Text style={[s.td, { flex: 2, fontFamily: "Courier" }]}>{b.sku}</Text>
+              <Text style={[s.td, { flex: 4 }]}>{b.nama}</Text>
+              <Text style={[s.td, s.num, s.bold, { flex: 1 }]}>{b.totalQty}</Text>
+              <Text style={[s.td, { flex: 2 }]}>{b.satuan}</Text>
+              <View style={[s.td, { flex: 1, alignItems: "center" }]}><View style={s.checkbox} /></View>
+            </View>
+          ))}
+        </View>
+        <View style={s.signRow}>
+          <View style={s.signBox}><Text style={s.signLine}>Disiapkan (Gudang)</Text></View>
+          <View style={s.signBox}><Text style={s.signLine}>Diperiksa (Fakturist)</Text></View>
+        </View>
+        <View style={{ marginTop: 12 }}>
+          <Text style={{ fontSize: 8, color: C.sub }}>Dari nota: {orderIds}</Text>
+        </View>
+        <Footer />
+      </Page>
+    </Document>
+  );
+}
+
 // ── Render helpers (server) ──────────────────────────────────────────────────
 export const renderFakturPdf = (o: OrderView) => renderToBuffer(<FakturDoc o={o} />);
 export const renderPickListPdf = (o: OrderView) => renderToBuffer(<PickListDoc o={o} />);
@@ -348,3 +411,5 @@ export const renderRekapPdf = (orders: OrderView[], cabangNama: string, tanggal:
   renderToBuffer(<RekapDoc orders={orders} cabangNama={cabangNama} tanggal={tanggal} />);
 export const renderKwitansiPdf = (o: OrderView, jumlah: number, metode: string) =>
   renderToBuffer(<KwitansiDoc o={o} jumlah={jumlah} metode={metode} />);
+export const renderAggPickListPdf = (orders: OrderView[], cabangNama: string, tanggal: string) =>
+  renderToBuffer(<AggPickListDoc orders={orders} cabangNama={cabangNama} tanggal={tanggal} />);

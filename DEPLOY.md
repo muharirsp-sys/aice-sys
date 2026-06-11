@@ -1,3 +1,11 @@
+<!--
+Tujuan: Panduan ringkas deployment Aice Sys3 ke VPS melalui Coolify.
+Caller: Operator deployment dan developer.
+Dependensi: Dockerfile, scripts/migrate.mjs, src/db/seed.ts, konfigurasi Coolify.
+Main Functions: Konfigurasi build, storage, environment, migrasi, seed, domain, dan backup.
+Side Effects: Perintah deployment dapat membuat/mengubah container, volume, dan database produksi.
+-->
+
 # Deploy ke VPS dengan Coolify
 
 Referensi: https://coolify.io/
@@ -50,7 +58,7 @@ Di **Environment Variables**, set (lihat `.env.production.example`):
 - **Seed awal (opsional, sekali saja)**: untuk membuat user/role/cabang contoh,
   jalankan via Coolify **Terminal/Exec** ke container:
   ```bash
-  pnpm db:seed
+  pnpm db:seed:prod
   ```
   > Seed **menghapus & mengisi ulang** data contoh — jangan jalankan di produksi
   > yang sudah berisi data nyata. Untuk produksi sungguhan, buat master data

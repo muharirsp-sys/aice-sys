@@ -29,6 +29,17 @@ Side Effects: Tidak ada; dokumentasi saja.
 | Master data | `/master` | `src/components/master/master-client.tsx` | `src/server/master-actions.ts` | Drizzle -> tabel master |
 | Upload | Form/action terkait | `src/server/upload.ts` | Validasi dan penyimpanan file | `/app/public/uploads` |
 | PDF | `/pdf/*` | `src/app/pdf/**/route.ts` | `src/pdf/documents.tsx` | Query SQLite, respons PDF |
+| Kanvas luar kota | `/sales/kanvas`, panel Muatan Kanvas di `/gudang` | `src/app/sales/kanvas/**`, `src/components/kanvas/*` | `src/server/kanvas-actions.ts`, `src/server/kanvas-queries.ts` | Tabel `trip_kanvas`, `trip_item`; kolom `order.tipe/trip_id/share_token` |
+| Faktur publik (WA) | `/f/[token]` — tanpa login, dikecualikan di matcher `src/proxy.ts` | `src/app/f/[token]/route.ts` | `getOrderByShareToken()` + `renderFakturPdf()` | Lookup `order.share_token`, respons PDF |
+
+## Modul Kanvas Luar Kota
+
+- Trip: sales mengajukan muatan (`diajukan`) → gudang konfirmasi muat (`berjalan`) → sales mengakhiri trip + qty kembali (`rekonsiliasi`) → gudang verifikasi (`selesai`).
+- Faktur kanvas (`order.tipe = 'kanvas'`) terbit langsung berstatus `delivered` tanpa approval admin; kontrol pengganti: harga/diskon via `priceOrderLines()` dan guard qty ≤ sisa muatan trip.
+- Qty terjual tidak disimpan — dihitung dari `order_item` join `order.trip_id` (exclude `rejected`).
+- Pembayaran tunai dicatat sales sendiri (`recordKanvasPayment`); faktur tempo muncul di antrean Incaso (status `delivered`).
+- Kirim faktur ke WA toko dari HP sales: Web Share API (PDF asli) dengan fallback link `wa.me` berisi URL publik `/f/[share_token]`.
+- Selisih rekonsiliasi (muat ≠ terjual + kembali) wajib catatan gudang dan tercatat di audit log.
 
 ## Alur Login
 

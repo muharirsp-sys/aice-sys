@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Clock, Lock, TriangleAlert, BellRing } from "lucide-react";
+import { CheckCircle2, Clock, Lock, TriangleAlert, BellRing, Download } from "lucide-react";
 import { btn } from "@/lib/ui";
 import { markClosing, lockDate, sendTeguran } from "@/server/actions";
 
@@ -17,18 +17,24 @@ type DivisiState = {
 
 export function ClosingPanel({
   tanggalLabel,
+  tanggal,
   cabangNama,
   divisi,
   isLocked,
   actorRole,
   isOwner,
+  blockers,
+  h1Locked,
 }: {
   tanggalLabel: string;
+  tanggal: string;
   cabangNama: string;
   divisi: DivisiState[];
   isLocked: boolean;
   actorRole: string | null;
   isOwner: boolean;
+  blockers: Record<string, number>;
+  h1Locked: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -69,6 +75,15 @@ export function ClosingPanel({
         <p className="mb-4 rounded-md border border-l-4 border-l-critical bg-critical/10 p-3 text-sm font-semibold text-critical">{err}</p>
       )}
 
+      {!h1Locked && !isLocked && (
+        <div className="mb-4 flex items-start gap-2 rounded-md border border-l-4 border-l-critical bg-critical/10 p-3 text-sm">
+          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-critical" />
+          <span>
+            <strong>Perhatian:</strong> Tanggal kemarin belum dikunci — operasi hari ini diblokir sampai Owner kunci H-1.
+          </span>
+        </div>
+      )}
+
       {!isLocked && belum.length > 0 && (
         <div className="mb-4 flex items-start gap-2 rounded-md border border-l-4 border-l-warning bg-warning/15 p-3 text-sm">
           <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning-foreground" />
@@ -103,6 +118,12 @@ export function ClosingPanel({
                       : "Menunggu giliran"}
                 </p>
               </div>
+
+              {!d.done && (blockers[d.role] ?? 0) > 0 && (
+                <span className="inline-flex items-center rounded-md bg-critical/15 px-2 py-0.5 text-xs font-semibold text-critical">
+                  {blockers[d.role]} order tertunda
+                </span>
+              )}
 
               {!d.done && d.ditegur && (
                 <span className="inline-flex items-center gap-1 rounded-md bg-accent/15 px-2 py-0.5 text-xs font-semibold text-accent-foreground">
@@ -143,6 +164,16 @@ export function ClosingPanel({
         ) : (
           <p className="text-xs text-muted-foreground">Penguncian tanggal dilakukan oleh Owner.</p>
         )}
+        <div className="mt-3">
+          <a
+            href={`/export/rekap_harian?from=${tanggal}&to=${tanggal}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={btn.outline}
+          >
+            <Download className="size-4" /> Unduh Rekap Harian
+          </a>
+        </div>
       </div>
     </div>
   );

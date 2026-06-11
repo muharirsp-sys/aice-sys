@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { requireRole } from "@/lib/session";
+import { requireRole, getEffectiveCabangId } from "@/lib/session";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { PageHeader } from "@/components/ui/page-header";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { TrafficLightList } from "@/components/ui/traffic-light-list";
 import { rupiah } from "@/lib/format";
-import { ownerDashboard } from "@/server/queries";
+import { ownerDashboard, listCabangAll } from "@/server/queries";
 import { deltaPersenOf } from "@/lib/pricing-calc";
 import type { AlertLevel } from "@/lib/order-status";
 
@@ -17,12 +17,25 @@ const DOT: Record<AlertLevel, string> = {
 
 export default async function OwnerDashboard() {
   const user = await requireRole("owner");
-  const d = await ownerDashboard();
+  const effectiveCabangId = await getEffectiveCabangId(user);
+  const [d, cabangs] = await Promise.all([
+    ownerDashboard(effectiveCabangId),
+    listCabangAll(),
+  ]);
   const delta = deltaPersenOf(d.pendapatanHariIni, d.pendapatanKemarin);
+  const cabangLabel = effectiveCabangId
+    ? (cabangs.find((c) => c.id === effectiveCabangId)?.nama ?? "Cabang")
+    : "Semua Cabang";
 
   return (
-    <DashboardShell userName={user.name} roleId={user.roleId} cabangId={user.cabangId}>
-      <PageHeader title="Dashboard Owner" desc="Ringkasan seluruh cabang · diperbarui real-time" />
+    <DashboardShell
+      userName={user.name}
+      roleId={user.roleId}
+      cabangId={user.cabangId}
+      cabangs={cabangs}
+      effectiveCabangId={effectiveCabangId}
+    >
+      <PageHeader title="Dashboard Owner" desc={`${cabangLabel} · diperbarui real-time`} />
 
       <section className="grid gap-4 sm:grid-cols-3">
         <KpiCard title="Pendapatan Hari Ini" value={rupiah(d.pendapatanHariIni)} delta={delta} />

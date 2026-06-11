@@ -3,13 +3,13 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Check, X, FileText, ClipboardList } from "lucide-react";
+import { Check, CheckCheck, X, FileText, ClipboardList } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { rupiah } from "@/lib/format";
 import { totalItems } from "@/lib/pricing-calc";
 import { btn, input, label } from "@/lib/ui";
 import type { OrderView } from "@/lib/order-status";
-import { approveOrder, rejectOrder } from "@/server/actions";
+import { approveOrder, approveAllOrders, rejectOrder } from "@/server/actions";
 
 export function ApprovalList({ orders }: { orders: OrderView[] }) {
   const router = useRouter();
@@ -22,6 +22,14 @@ export function ApprovalList({ orders }: { orders: OrderView[] }) {
     setErr(null);
     startTransition(async () => {
       const r = await approveOrder(id);
+      if (!r.ok) setErr(r.error);
+      else router.refresh();
+    });
+  }
+  function approveAll() {
+    setErr(null);
+    startTransition(async () => {
+      const r = await approveAllOrders(orders.map((o) => o.id));
       if (!r.ok) setErr(r.error);
       else router.refresh();
     });
@@ -48,6 +56,13 @@ export function ApprovalList({ orders }: { orders: OrderView[] }) {
     <>
       {err && (
         <p className="mb-3 rounded-md border border-l-4 border-l-critical bg-critical/10 p-3 text-sm font-semibold text-critical">{err}</p>
+      )}
+      {orders.length > 1 && (
+        <div className="mb-3 flex justify-end">
+          <button className={btn.primary} disabled={pending} onClick={approveAll}>
+            <CheckCheck className="size-4" /> Setujui Semua ({orders.length})
+          </button>
+        </div>
       )}
       <div className="space-y-3">
         {orders.map((o) => (

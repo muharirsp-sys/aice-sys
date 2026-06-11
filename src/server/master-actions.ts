@@ -11,7 +11,16 @@ Side Effects: Read/write database, audit log, dan revalidasi halaman.
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { produk, cabang, toko, hargaCabang, diskonToko } from "@/db/schema";
+import {
+  produk,
+  cabang,
+  toko,
+  hargaCabang,
+  diskonToko,
+  stokCabang,
+  kartuStok,
+  auditLog,
+} from "@/db/schema";
 import { getCurrentUser } from "@/lib/session";
 import { canAccessRole, roleNameFromId } from "@/lib/roles";
 import { writeAudit } from "./audit";
@@ -36,21 +45,69 @@ export async function upsertProduk(input: {
   nama: string;
   sku: string;
   satuan: string;
+  initialStocks?: { cabangId: number; qty: number }[];
 }): Promise<Result> {
   const a = await ownerActor();
   if ("error" in a) return { ok: false, error: a.error };
   if (!input.nama.trim() || !input.sku.trim() || !input.satuan.trim())
     return { ok: false, error: "Nama, SKU, dan satuan wajib diisi." };
+
+  const stocks = (input.initialStocks ?? []).filter((s) => s.qty > 0);
+  if (stocks.some((s) => !Number.isFinite(s.qty) || s.qty < 0))
+    return { ok: false, error: "Qty stok tidak boleh negatif." };
+
+  const isUpdate = !!input.id;
+  const now = new Date();
+
   try {
-    if (input.id) {
-      await db.update(produk).set({ nama: input.nama.trim(), sku: input.sku.trim(), satuan: input.satuan.trim() }).where(eq(produk.id, input.id));
-    } else {
-      await db.insert(produk).values({ nama: input.nama.trim(), sku: input.sku.trim(), satuan: input.satuan.trim() });
-    }
+    await db.transaction(async (tx) => {
+      if (isUpdate) {
+        await tx
+          .update(produk)
+          .set({ nama: input.nama.trim(), sku: input.sku.trim(), satuan: input.satuan.trim() })
+          .where(eq(produk.id, input.id!));
+      } else {
+        const [created] = await tx
+          .insert(produk)
+          .values({ nama: input.nama.trim(), sku: input.sku.trim(), satuan: input.satuan.trim() })
+          .returning({ id: produk.id });
+
+        // Inject initial stock per cabang — API guard + DB CHECK as double safety.
+        for (const s of stocks) {
+          await tx.insert(stokCabang).values({ produkId: created.id, cabangId: s.cabangId, qty: s.qty });
+          await tx.insert(kartuStok).values({
+            produkId: created.id,
+            cabangId: s.cabangId,
+            tipe: "SALDO_AWAL",
+            qty: s.qty,
+            qtySaldo: s.qty,
+            keterangan: "Saldo awal saat pembuatan produk",
+            refType: "manual",
+            refId: null,
+            createdBy: a.userId,
+            createdAt: now,
+          });
+        }
+      }
+
+      await tx.insert(auditLog).values({
+        userId: a.userId,
+        action: "master_data",
+        tableAffected: "produk",
+        oldValue: null,
+        newValue: JSON.stringify({
+          op: isUpdate ? "update" : "create",
+          sku: input.sku,
+          stockEntries: stocks.length,
+        }),
+        timestamp: now,
+      });
+    });
   } catch {
     return { ok: false, error: "Gagal — SKU mungkin sudah dipakai." };
   }
-  await audit(a.userId, "produk", input.id ? "update" : "create", { sku: input.sku });
+
+  revalidatePath("/master");
   return { ok: true };
 }
 

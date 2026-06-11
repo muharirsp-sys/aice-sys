@@ -3,19 +3,37 @@ import { namaCabang } from "@/server/queries";
 import { ROLE_LABEL, roleNameFromId } from "@/lib/roles";
 import { AppNav } from "./app-nav";
 import { LogoutButton } from "./logout-button";
+import { CabangSwitcher } from "./cabang-switcher";
+
+type CabangOption = { id: number; nama: string };
 
 type Props = {
   userName: string;
   roleId: number;
   cabangId: number;
   children: React.ReactNode;
+  cabangs?: CabangOption[];
+  effectiveCabangId?: number | null;
 };
 
 // Kerangka aplikasi: header identitas + navigasi (difilter peran) + area konten.
-export async function DashboardShell({ userName, roleId, cabangId, children }: Props) {
+export async function DashboardShell({
+  userName,
+  roleId,
+  cabangId,
+  children,
+  cabangs,
+  effectiveCabangId,
+}: Props) {
   const roleName = roleNameFromId(roleId);
   const roleLabel = roleName ? ROLE_LABEL[roleName] : "Pengguna";
-  const cabang = await namaCabang(cabangId);
+  // Tampilkan nama cabang efektif: null = "Semua Cabang", number = nama spesifik.
+  const displayCabang =
+    cabangs !== undefined
+      ? effectiveCabangId == null
+        ? "Semua Cabang"
+        : (cabangs.find((c) => c.id === effectiveCabangId)?.nama ?? (await namaCabang(cabangId)))
+      : await namaCabang(cabangId);
 
   return (
     <div className="min-h-screen">
@@ -30,10 +48,13 @@ export async function DashboardShell({ userName, roleId, cabangId, children }: P
                 Aice — Konsol Operasi
               </p>
               <p className="truncate text-xs text-muted-foreground">
-                {cabang} · {userName} ·{" "}
+                {displayCabang} · {userName} ·{" "}
                 <span className="text-foreground">{roleLabel}</span>
               </p>
             </div>
+            {cabangs && (
+              <CabangSwitcher cabangs={cabangs} activeCabangId={effectiveCabangId ?? null} />
+            )}
             <LogoutButton />
           </div>
           <div className="pb-2">

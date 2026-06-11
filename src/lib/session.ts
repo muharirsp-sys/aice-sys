@@ -6,12 +6,13 @@ Main Functions: getCurrentUser, requireUser, requireRole.
 Side Effects: Membaca cookie sesi dan dapat melakukan redirect.
 */
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "./auth";
 import {
   canAccessRole,
   dashboardPathForRoleId,
+  hasGlobalDataAccess,
   roleNameFromId,
   type RoleName,
 } from "./roles";
@@ -27,6 +28,20 @@ export async function requireUser() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   return user;
+}
+
+// cabangId efektif untuk global-access user (dari cookie); non-global selalu user.cabangId.
+// null = semua cabang (global user tanpa pilihan aktif).
+export async function getEffectiveCabangId(user: {
+  cabangId: number;
+  roleId: number;
+}): Promise<number | null> {
+  const role = roleNameFromId(user.roleId);
+  if (!hasGlobalDataAccess(role)) return user.cabangId;
+  const val = (await cookies()).get("active_cabang_id")?.value;
+  if (!val) return null;
+  const id = Number(val);
+  return Number.isNaN(id) ? null : id;
 }
 
 // Wajib login + peran tertentu. Jika peran tidak cocok, alihkan ke dashboard miliknya.

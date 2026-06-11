@@ -1,7 +1,8 @@
 import { requireRole } from "@/lib/session";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { PageHeader } from "@/components/ui/page-header";
-import { AuditTable, type AuditRow } from "@/components/audit/audit-table";
+import { type AuditRow } from "@/components/audit/audit-table";
+import { AuditExplorer } from "@/components/audit/audit-explorer";
 import { listAudit } from "@/server/queries";
 import { ROLE_LABEL, roleNameFromId } from "@/lib/roles";
 
@@ -54,6 +55,11 @@ export default async function AuditPage() {
       aksi: ACTION_LABEL[r.action] ?? r.action,
       tabel: r.table,
       detail: ringkas(r.newValue),
+      oldValue: r.oldValue,
+      newValue: r.newValue,
+      ts: r.ts.toISOString(),
+      pelakuKey: String(r.userId),
+      aksiCode: r.action,
     };
   });
 
@@ -61,9 +67,9 @@ export default async function AuditPage() {
     <DashboardShell userName={user.name} roleId={user.roleId} cabangId={user.cabangId}>
       <PageHeader
         title="Audit Trail"
-        desc={`${rows.length} aktivitas tercatat · log permanen anti-fraud (tabel virtualisasi)`}
+        desc={`${rows.length} aktivitas tercatat · log permanen anti-fraud · filter & diff lama→baru`}
       />
-      <AuditTable rows={rows} />
+      <AuditExplorer rows={rows} />
     </DashboardShell>
   );
 }

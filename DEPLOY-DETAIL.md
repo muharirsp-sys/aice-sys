@@ -1,3 +1,11 @@
+<!--
+Tujuan: Panduan operasional lengkap deployment dan pemeliharaan Aice Sys3 di Coolify.
+Caller: Operator VPS/Coolify dan developer.
+Dependensi: Dockerfile, scripts/migrate.mjs, src/db/seed.ts, konfigurasi DNS dan Coolify.
+Main Functions: Setup server, deploy, validasi, seed, update, backup, dan troubleshooting.
+Side Effects: Perintah operasional dapat mengubah container, volume, database, DNS, dan layanan VPS.
+-->
+
 # Setup Aice di VPS dari 0 (Detail Step-by-Step)
 
 Instruksi ini untuk deploy ke VPS baru dengan Coolify. VPS disarankan **Ubuntu 22.04+** atau **Debian 12+**, minimal **2GB RAM** (lebih baik 4GB+).
@@ -258,7 +266,7 @@ Klik login, harusnya muncul dashboard Owner.
 ## Fase 9: Setup Master Data (Opsional, untuk Data Produksi)
 
 ### 9.1 Jika sudah ada data nyata (tidak gunakan seed)
-**Jangan** jalankan `pnpm db:seed` di container! Seed menghapus & isi ulang data.
+**Jangan** jalankan `pnpm db:seed:prod` di container! Seed menghapus & isi ulang data.
 
 Sebagai gantinya, gunakan menu **Master** di UI:
 - Login sebagai Owner
@@ -270,7 +278,7 @@ Sekali saja, jalankan seed via Coolify **Terminal**:
 - Resource aplikasi → **Terminal** (tab)
 - Ketik:
   ```bash
-  pnpm db:seed
+  pnpm db:seed:prod
   ```
   Tunggu selesai (~5 detik).
 

@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Jangan di-bundle: better-sqlite3 (native), better-auth (kysely/bun dialect),
-  // @react-pdf/renderer (fontkit/yoga) — di-load Node saat runtime.
-  serverExternalPackages: ["better-sqlite3", "better-auth", "@react-pdf/renderer"],
+  // @react-pdf/renderer (fontkit/yoga), exceljs (stream/zip) — di-load Node saat runtime.
+  serverExternalPackages: ["better-sqlite3", "better-auth", "@react-pdf/renderer", "exceljs"],
 
   async headers() {
     return [

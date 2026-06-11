@@ -7,13 +7,25 @@ Side Effects: Membaca sesi dan database.
 */
 
 import Link from "next/link";
-import { MapPin, ExternalLink, Camera, AlertOctagon } from "lucide-react";
+import {
+  AlertOctagon,
+  FileText,
+  CheckCircle2,
+  Truck,
+  Wallet,
+  RotateCcw,
+} from "lucide-react";
 import { requireUser } from "@/lib/session";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatusPill } from "@/components/ui/status-pill";
+import { ActivityTimeline, type TimelineNode } from "@/components/ui/timeline";
+import { EvidenceViewer } from "@/components/ui/evidence-viewer";
+import { DiscrepancyBadge } from "@/components/ui/discrepancy-badge";
+import { SlaBadge } from "@/components/ui/sla-badge";
 import { getOrderDetail } from "@/server/queries";
 import { hasGlobalDataAccess, roleNameFromId } from "@/lib/roles";
+import { ResetOrderButton } from "@/components/admin/reset-order-button";
 import { subtotalItem, totalItems } from "@/lib/pricing-calc";
 import { rupiah, tglPendek } from "@/lib/format";
 
@@ -65,14 +77,225 @@ export default async function OrderDetailPage({
     );
   }
 
+  // ── Pencocokan bukti silang: tagihan (sistem) vs setoran (incaso) ───────────
+  const totalTagihan = totalItems(o.items);
+  const selisihBayar = pembayaran ? pembayaran.jumlah - totalTagihan : 0;
+  const adaSelisih = pembayaran != null && Math.abs(selisihBayar) > 0;
+
+  // ── Timeline kronologis (siapa → kapan → status lama → baru) ────────────────
+  const nodes: TimelineNode[] = [];
+
+  // 1. Order dibuat (Sales)
+  nodes.push({
+    id: "buat",
+    icon: FileText,
+    title: o.tipe === "kanvas" ? "Faktur Kanvas terbit" : "Order dibuat",
+    pelaku: `Sales ${o.salesNama}`,
+    waktu: o.tanggal,
+    ke: o.tipe === "kanvas" ? "kanvas" : "pending_approval",
+    level: "ok",
+    done: true,
+    extra: (
+      <span className="text-sm text-muted-foreground">
+        Total tagihan{" "}
+        <span className="tabular font-semibold text-foreground">{rupiah(totalTagihan)}</span> ·{" "}
+        {o.items.length} item
+      </span>
+    ),
+  });
+
+  // 2. Persetujuan (Admin Fakturist)
+  if (o.tipe === "kanvas") {
+    nodes.push({
+      id: "approval",
+      icon: CheckCircle2,
+      title: "Tanpa approval admin",
+      pelaku: "Faktur kanvas — terbit langsung di toko",
+      level: "ok",
+      done: true,
+    });
+  } else if (approval) {
+    const isReset = approval.status === "reset_to_pending";
+    const ditolak = !isReset && approval.status !== "approved";
+    nodes.push({
+      id: "approval",
+      icon: isReset ? RotateCcw : CheckCircle2,
+      title: isReset ? "Direset ke Pending oleh Owner" : ditolak ? "Order ditolak" : "Order disetujui",
+      pelaku: isReset ? `Owner ${approval.adminNama}` : `Admin ${approval.adminNama}`,
+      waktu: approval.approvedAt ? approval.approvedAt.toISOString() : null,
+      dari: "pending_approval",
+      ke: isReset ? "pending_approval" : ditolak ? "rejected" : "approved",
+      level: isReset ? "warning" : ditolak ? "critical" : "ok",
+      done: true,
+      extra: (
+        <div className="flex flex-wrap items-center gap-2">
+          {!isReset && <SlaBadge since={o.tanggal} until={approval.approvedAt?.toISOString() ?? null} />}
+          {approval.alasanTolak && !isReset && (
+            <span className="rounded-md bg-critical/10 px-2 py-0.5 text-xs text-critical">
+              Alasan tolak: {approval.alasanTolak}
+            </span>
+          )}
+          {isReset && (
+            <span className="rounded-md bg-accent/10 px-2 py-0.5 text-xs text-accent-foreground">
+              Admin dapat memproses ulang
+            </span>
+          )}
+        </div>
+      ),
+    });
+  } else {
+    nodes.push({
+      id: "approval",
+      icon: CheckCircle2,
+      title: "Menunggu persetujuan",
+      level: "pending",
+      done: false,
+      extra: <SlaBadge since={o.tanggal} />,
+    });
+  }
+
+  // 3. Pengiriman (Delivery)
+  if (o.tipe === "kanvas") {
+    nodes.push({
+      id: "kirim",
+      icon: Truck,
+      title: "Tanpa tahap delivery",
+      pelaku: "Barang diserahkan langsung dari kendaraan",
+      level: "ok",
+      done: true,
+    });
+  } else if (pengiriman) {
+    nodes.push({
+      id: "kirim",
+      icon: Truck,
+      title: "Barang diterima toko",
+      pelaku: `Delivery ${pengiriman.deliveryNama}`,
+      waktu: pengiriman.diterima ? pengiriman.diterima.toISOString() : null,
+      dari: "ready_to_ship",
+      ke: "delivered",
+      level: "ok",
+      done: true,
+      extra: (
+        <EvidenceViewer
+          title={`Bukti Pengiriman · Order #${o.id}`}
+          imageUrl={pengiriman.buktiUrl}
+          imageAlt="Foto bukti terima"
+          gps={pengiriman.gps}
+          mapsHref={pengiriman.gps ? mapsHref(pengiriman.gps) : null}
+          triggerLabel="Periksa bukti terima"
+          fields={[
+            { label: "Penerima / Delivery", value: pengiriman.deliveryNama },
+            {
+              label: "Waktu terima",
+              value: pengiriman.diterima ? tglPendek(pengiriman.diterima.toISOString()) : "—",
+            },
+            { label: "Koordinat GPS", value: pengiriman.gps ?? "—", mono: true },
+            { label: "Total tagihan", value: rupiah(totalTagihan), mono: true },
+          ]}
+        />
+      ),
+    });
+  } else {
+    nodes.push({
+      id: "kirim",
+      icon: Truck,
+      title: "Belum dikirim",
+      level: "pending",
+      done: false,
+    });
+  }
+
+  // 4. Pembayaran (Incaso)
+  if (pembayaran) {
+    nodes.push({
+      id: "bayar",
+      icon: Wallet,
+      title: "Pembayaran diterima",
+      pelaku: `Incaso ${pembayaran.incasoNama}`,
+      waktu: pembayaran.tanggalBayar.toISOString(),
+      dari: "delivered",
+      ke: "paid",
+      level: adaSelisih ? "warning" : "ok",
+      done: true,
+      extra: (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="tabular text-sm font-semibold">{rupiah(pembayaran.jumlah)}</span>
+            <span className="text-xs capitalize text-muted-foreground">{pembayaran.metode}</span>
+            <DiscrepancyBadge selisih={selisihBayar} />
+          </div>
+          <EvidenceViewer
+            title={`Bukti Pembayaran · Order #${o.id}`}
+            imageUrl={pembayaran.buktiUrl}
+            imageAlt="Bukti pembayaran"
+            triggerLabel="Cocokkan setoran vs tagihan"
+            fields={[
+              { label: "Total tagihan (sistem)", value: rupiah(totalTagihan), mono: true },
+              {
+                label: "Setoran diterima",
+                value: rupiah(pembayaran.jumlah),
+                mono: true,
+                highlight: adaSelisih ? "warning" : "ok",
+              },
+              {
+                label: "Selisih",
+                value: rupiah(Math.abs(selisihBayar)),
+                mono: true,
+                highlight: adaSelisih ? "critical" : "ok",
+              },
+              { label: "Metode", value: pembayaran.metode },
+              { label: "Kolektor / Incaso", value: pembayaran.incasoNama },
+              { label: "Tanggal bayar", value: tglPendek(pembayaran.tanggalBayar.toISOString()) },
+            ]}
+          />
+        </div>
+      ),
+    });
+  } else {
+    nodes.push({
+      id: "bayar",
+      icon: Wallet,
+      title: "Belum dibayar",
+      level: "pending",
+      done: false,
+    });
+  }
+
+  // 5. Issue / selisih (jika ada) — disisipkan sebagai node kritis di akhir.
+  for (const i of issues) {
+    nodes.push({
+      id: `issue-${i.id}`,
+      icon: AlertOctagon,
+      title: `Laporan ${i.role}: ${i.deskripsi}`,
+      pelaku: i.pelaporNama,
+      waktu: i.waktu.toISOString(),
+      level: i.selesai ? "ok" : "critical",
+      done: i.selesai,
+      extra: i.selesai ? (
+        <span className="text-xs font-semibold text-ok">Selesai ditindaklanjuti</span>
+      ) : (
+        <span className="text-xs font-semibold text-critical">Belum selesai</span>
+      ),
+    });
+  }
+
   return (
     <DashboardShell userName={user.name} roleId={user.roleId} cabangId={user.cabangId}>
       <PageHeader title={`Order #${o.id}`} desc={`${o.tokoNama} · ${o.cabangNama} · ${tglPendek(o.tanggal)}`}>
+        {o.tipe === "kanvas" && (
+          <span className="rounded-full bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent-foreground">
+            Faktur Kanvas
+          </span>
+        )}
+        {adaSelisih && <DiscrepancyBadge selisih={selisihBayar} />}
         <StatusPill status={o.status} />
+        {o.status === "rejected" && hasGlobalDataAccess(roleNameFromId(user.roleId)) && (
+          <ResetOrderButton orderId={o.id} />
+        )}
       </PageHeader>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* Item */}
+        {/* Item & Harga */}
         <Section title="Item & Harga">
           <table className="w-full text-sm">
             <tbody>
@@ -87,7 +310,7 @@ export default async function OrderDetailPage({
             <tfoot>
               <tr>
                 <td colSpan={2} className="pt-3 text-right font-semibold">Total</td>
-                <td className="pt-3 text-right tabular text-lg font-extrabold">{rupiah(totalItems(o.items))}</td>
+                <td className="pt-3 text-right tabular text-lg font-extrabold">{rupiah(totalTagihan)}</td>
               </tr>
             </tfoot>
           </table>
@@ -96,105 +319,11 @@ export default async function OrderDetailPage({
           </p>
         </Section>
 
-        {/* Approval */}
-        <Section title="Persetujuan (Admin Fakturist)">
-          {approval ? (
-            <div className="text-sm">
-              <StatusPill status={approval.status === "approved" ? "approved" : "rejected"} />
-              <p className="mt-2 text-muted-foreground">
-                Oleh {approval.adminNama}
-                {approval.approvedAt ? ` · ${tglPendek(approval.approvedAt.toISOString())}` : ""}
-              </p>
-              {approval.alasanTolak && (
-                <p className="mt-2 rounded-md bg-critical/10 p-2 text-critical">Alasan tolak: {approval.alasanTolak}</p>
-              )}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Belum diproses.</p>
-          )}
-        </Section>
-
-        {/* Bukti Pengiriman (Delivery) */}
-        <Section title="Bukti Pengiriman (Delivery)">
-          {pengiriman ? (
-            <div className="flex gap-4">
-              <a
-                href={pengiriman.buktiUrl ?? "#"}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block size-28 shrink-0 overflow-hidden rounded-md border bg-muted"
-              >
-                {pengiriman.buktiUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={pengiriman.buktiUrl} alt="Foto bukti terima" loading="lazy" decoding="async" className="size-full object-cover" />
-                ) : (
-                  <span className="grid size-full place-items-center"><Camera className="size-6 text-muted-foreground" /></span>
-                )}
-              </a>
-              <div className="text-sm">
-                <p className="font-semibold">Diterima · {pengiriman.deliveryNama}</p>
-                {pengiriman.diterima && (
-                  <p className="text-muted-foreground">{tglPendek(pengiriman.diterima.toISOString())}</p>
-                )}
-                {pengiriman.gps && (
-                  <a href={mapsHref(pengiriman.gps)} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-primary hover:underline">
-                    <MapPin className="size-3.5" /> <span className="tabular">{pengiriman.gps}</span> <ExternalLink className="size-3" />
-                  </a>
-                )}
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Belum dikirim.</p>
-          )}
-        </Section>
-
-        {/* Bukti Pembayaran (Incaso) */}
-        <Section title="Bukti Pembayaran (Incaso)">
-          {pembayaran ? (
-            <div className="flex gap-4">
-              <a
-                href={pembayaran.buktiUrl ?? "#"}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block size-28 shrink-0 overflow-hidden rounded-md border bg-muted"
-              >
-                {pembayaran.buktiUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={pembayaran.buktiUrl} alt="Bukti pembayaran" loading="lazy" decoding="async" className="size-full object-cover" />
-                ) : (
-                  <span className="grid size-full place-items-center"><Camera className="size-6 text-muted-foreground" /></span>
-                )}
-              </a>
-              <div className="text-sm">
-                <p className="tabular text-lg font-bold">{rupiah(pembayaran.jumlah)}</p>
-                <p className="capitalize text-muted-foreground">{pembayaran.metode} · {pembayaran.incasoNama}</p>
-                <p className="text-muted-foreground">{tglPendek(pembayaran.tanggalBayar.toISOString())}</p>
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Belum dibayar.</p>
-          )}
+        {/* Jejak Audit (Timeline) */}
+        <Section title="Jejak Audit & Bukti">
+          <ActivityTimeline nodes={nodes} />
         </Section>
       </div>
-
-      {/* Issues */}
-      {issues.length > 0 && (
-        <div className="mt-4">
-          <Section title="Laporan Kendala / Selisih">
-            <ul className="space-y-2">
-              {issues.map((i) => (
-                <li key={i.id} className="flex items-start gap-2 text-sm">
-                  <AlertOctagon className="mt-0.5 size-4 shrink-0 text-critical" />
-                  <span>
-                    <span className="font-semibold uppercase">{i.role}</span> — {i.deskripsi}{" "}
-                    <span className="text-muted-foreground">({i.pelaporNama} · {tglPendek(i.waktu.toISOString())}{i.selesai ? " · selesai" : ""})</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        </div>
-      )}
 
       <p className="mt-6">
         <Link href="/owner" className="text-sm text-muted-foreground hover:underline">← Kembali ke dashboard</Link>

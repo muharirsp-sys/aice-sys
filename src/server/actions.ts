@@ -9,7 +9,7 @@ Side Effects: Read/write database, file upload, audit log, dan revalidasi halama
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   order,
@@ -31,8 +31,7 @@ import {
 import { priceOrderLines, type LineInput } from "./pricing";
 import { saveUpload } from "./upload";
 import { writeAudit } from "./audit";
-import { isDateLocked, dateKey, DIVISI_ORDER } from "./queries";
-import type { OrderStatus } from "@/lib/order-status";
+import { isDateLocked, isYesterdayLocked, dateKey, DIVISI_ORDER, getClosingBlockers } from "./queries";
 
 export type ActionResult =
   | { ok: true; orderId?: number }
@@ -93,6 +92,10 @@ export async function createOrder(input: {
   if (await isDateLocked(a.user.cabangId, new Date())) {
     return { ok: false, error: "Tanggal hari ini sudah dikunci — tidak bisa input order." };
   }
+  // H-1 freeze: blokir jika kemarin ada record closing tapi belum dikunci.
+  if (!(await isYesterdayLocked(a.user.cabangId))) {
+    return { ok: false, error: "Tanggal kemarin belum dikunci. Minta Owner tutup dulu." };
+  }
 
   // Harga otomatis + validasi batas diskon (anti-fraud, server-side).
   const priced = await priceOrderLines(a.user.cabangId, input.tokoId, input.items);
@@ -139,8 +142,12 @@ export async function approveOrder(orderId: number): Promise<ActionResult> {
   if ("error" in a) return { ok: false, error: a.error };
   const r = await loadOrder(orderId, a.user.cabangId);
   if ("error" in r) return { ok: false, error: r.error };
+  if (r.order.status === "approved")
+    return { ok: false, error: "Order sudah disetujui — tidak bisa disetujui ulang." };
+  if (r.order.status === "rejected")
+    return { ok: false, error: "Order ditolak dan terkunci. Minta Owner untuk mereset ke Pending." };
   if (r.order.status !== "pending_approval")
-    return { ok: false, error: "Order bukan status pending." };
+    return { ok: false, error: "Order tidak dalam status Pending — tidak bisa disetujui." };
 
   await db.update(order).set({ status: "approved" }).where(eq(order.id, orderId));
   await db.insert(approval).values({
@@ -408,6 +415,12 @@ export async function markClosing(): Promise<ActionResult> {
     if (!doneArr[j])
       return { ok: false, error: `Menunggu ${ROLE_LABEL[DIVISI_ORDER[j]]} closing dulu (berurutan).` };
 
+  // Gatekeeper: pastikan semua pekerjaan divisi ini sudah selesai.
+  const blockers = await getClosingBlockers(cabangId, tanggal);
+  const myBlockers = blockers[role!] ?? 0;
+  if (myBlockers > 0)
+    return { ok: false, error: `Masih ada ${myBlockers} order yang belum diselesaikan divisi ini.` };
+
   const patch =
     idx === 0 ? { salesDone: true }
     : idx === 1 ? { adminDone: true }
@@ -461,8 +474,93 @@ export async function sendTeguran(targetRole: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+// ── Approve All (batch untuk status pending_approval) ────────────────────────
+export async function approveAllOrders(orderIds: number[]): Promise<ActionResult> {
+  const a = await actorWithRole("admin_fakturist");
+  if ("error" in a) return { ok: false, error: a.error };
+  if (!orderIds.length) return { ok: false, error: "Tidak ada order untuk disetujui." };
+
+  const rows = await db
+    .select({ id: order.id, status: order.status, cabangId: order.cabangId, tanggal: order.tanggal })
+    .from(order)
+    .where(
+      and(
+        inArray(order.id, orderIds),
+        eq(order.status, "pending_approval"),
+        eq(order.cabangId, a.user.cabangId),
+      ),
+    );
+
+  if (!rows.length) return { ok: false, error: "Tidak ada order pending di cabang Anda." };
+
+  for (const o of rows) {
+    if (await isDateLocked(o.cabangId, o.tanggal))
+      return { ok: false, error: `Order #${o.id} — tanggal terkunci, tidak dapat disetujui.` };
+  }
+
+  const now = new Date();
+  for (const o of rows) {
+    await db.update(order).set({ status: "approved" }).where(eq(order.id, o.id));
+    await db.insert(approval).values({
+      orderId: o.id,
+      adminUserId: a.user.id,
+      approvedAt: now,
+      status: "approved",
+      alasanTolak: null,
+    });
+  }
+
+  await writeAudit({
+    userId: a.user.id,
+    action: "approve_all_orders",
+    table: "order",
+    newValue: { orderIds: rows.map((o) => o.id), count: rows.length },
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/gudang");
+  revalidatePath("/owner");
+  return { ok: true };
+}
+
+// ── Reset ke Pending (Owner/SuperAdmin override untuk order yang ditolak) ─────
+export async function resetOrderToPending(orderId: number): Promise<ActionResult> {
+  const a = await actorWithRole("owner");
+  if ("error" in a) return { ok: false, error: a.error };
+
+  const [o] = await db
+    .select({ id: order.id, status: order.status, cabangId: order.cabangId })
+    .from(order)
+    .where(eq(order.id, orderId))
+    .limit(1);
+
+  if (!o) return { ok: false, error: "Order tidak ditemukan." };
+  if (o.status !== "rejected")
+    return { ok: false, error: "Hanya order berstatus Ditolak yang bisa direset." };
+
+  await db.update(order).set({ status: "pending_approval" }).where(eq(order.id, orderId));
+  await db.insert(approval).values({
+    orderId,
+    adminUserId: a.user.id,
+    approvedAt: new Date(),
+    status: "reset_to_pending",
+    alasanTolak: "Direset ke Pending oleh Owner — Admin dapat memproses ulang.",
+  });
+  await writeAudit({
+    userId: a.user.id,
+    action: "reset_order_to_pending",
+    table: "order",
+    oldValue: { status: "rejected" },
+    newValue: { status: "pending_approval", orderId },
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/owner");
+  revalidatePath(`/order/${orderId}`);
+  return { ok: true };
+}
+
 // Catatan: aksi cetak (print) dicatat ke audit_log langsung di route handler PDF
 // (src/app/pdf/*), bukan dari client.
-
-// Tipe status (re-export untuk kenyamanan konsumen).
-export type { OrderStatus };
+// Catatan: jangan re-export tipe dari modul "use server" — loader server actions
+// Next mengubah seluruh export menjadi referensi runtime (ReferenceError).

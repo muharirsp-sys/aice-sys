@@ -20,6 +20,7 @@ import {
   LayoutDashboard,
   ScrollText,
   Database,
+  FileSpreadsheet,
 } from "lucide-react";
 import type { RoleName } from "@/lib/roles";
 
@@ -32,6 +33,7 @@ const LINKS = [
   { href: "/incaso", label: "Incaso", Icon: Wallet },
   { href: "/closing", label: "Closing", Icon: CalendarCheck },
   { href: "/master", label: "Master", Icon: Database },
+  { href: "/laporan", label: "Laporan", Icon: FileSpreadsheet },
   { href: "/audit", label: "Audit", Icon: ScrollText },
 ];
 
@@ -44,7 +46,7 @@ const ALLOWED: Record<RoleName, string[]> = {
   gudang: ["/gudang", "/closing"],
   delivery: ["/delivery", "/closing"],
   incaso: ["/incaso", "/closing"],
-  owner: ["/owner", "/master", "/closing", "/audit"],
+  owner: ["/owner", "/master", "/laporan", "/closing", "/audit"],
   super_admin: ALL_PATHS,
 };
 

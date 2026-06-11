@@ -1,5 +1,6 @@
-// Skema database — PERSIS mengikuti ER diagram prd.md §6.
-// Dialect: SQLite (better-sqlite3). Tidak ada tabel/kolom di luar PRD.
+// Skema database — mengikuti ER diagram prd.md §6, plus modul Kanvas Luar Kota
+// (trip_kanvas, trip_item, dan kolom order.tipe/trip_id/share_token).
+// Dialect: SQLite (better-sqlite3).
 //
 // Pemetaan tipe konseptual PRD -> Drizzle SQLite:
 //   int      -> integer (PK: autoIncrement)
@@ -12,7 +13,8 @@
 // user.email dan produk.sku (bukan kolom/tabel baru) — natural key yang dibutuhkan
 // untuk login & identifikasi produk.
 
-import { sqliteTable, integer, text } from "drizzle-orm/sqlite-core";
+import { sqliteTable, integer, text, uniqueIndex, check } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 export const cabang = sqliteTable("cabang", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -106,7 +108,13 @@ export const order = sqliteTable("order", {
   cabangId: integer("cabang_id")
     .notNull()
     .references(() => cabang.id),
-});
+  // Modul Kanvas: faktur kanvas terbit langsung di toko (tanpa approval admin).
+  tipe: text("tipe").notNull().default("taking_order"), // taking_order | kanvas
+  tripId: integer("trip_id").references(() => tripKanvas.id),
+  shareToken: text("share_token"), // token URL publik faktur (dikirim via WA)
+  isPrinted: integer("is_printed", { mode: "boolean" }).notNull().default(false),
+  isPickListed: integer("is_pick_listed", { mode: "boolean" }).notNull().default(false),
+}, (t) => [uniqueIndex("order_share_token_idx").on(t.shareToken)]);
 
 export const orderItem = sqliteTable("order_item", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -203,6 +211,70 @@ export const auditLog = sqliteTable("audit_log", {
   timestamp: integer("timestamp", { mode: "timestamp" }).notNull(),
 });
 
+// ── Modul Kanvas Luar Kota ──────────────────────────────────────────────────
+// Sales memuat barang sekali (trip multi-hari), membuat faktur langsung di toko,
+// lalu gudang merekonsiliasi: qtyMuat = total terjual (order kanvas) + qtyKembali.
+
+export const tripKanvas = sqliteTable("trip_kanvas", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  salesUserId: integer("sales_user_id")
+    .notNull()
+    .references(() => user.id),
+  cabangId: integer("cabang_id")
+    .notNull()
+    .references(() => cabang.id),
+  tujuan: text("tujuan").notNull(),
+  status: text("status").notNull(), // diajukan | berjalan | rekonsiliasi | selesai
+  tanggalBerangkat: integer("tanggal_berangkat", { mode: "timestamp" }),
+  tanggalKembali: integer("tanggal_kembali", { mode: "timestamp" }),
+  gudangMuatUserId: integer("gudang_muat_user_id").references(() => user.id),
+  gudangRekonUserId: integer("gudang_rekon_user_id").references(() => user.id),
+  catatanSelisih: text("catatan_selisih"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const tripItem = sqliteTable("trip_item", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tripId: integer("trip_id")
+    .notNull()
+    .references(() => tripKanvas.id),
+  produkId: integer("produk_id")
+    .notNull()
+    .references(() => produk.id),
+  qtyMuat: integer("qty_muat").notNull(),
+  qtyKembali: integer("qty_kembali"), // null sampai sales mengakhiri trip
+});
+
+// ── Stok & Kartu Stok ──────────────────────────────────────────────────────
+// Stok ditrack per-cabang (konsisten dengan pola hargaCabang).
+// stok_cabang = saldo saat ini; kartu_stok = ledger setiap mutasi.
+
+export const stokCabang = sqliteTable("stok_cabang", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  produkId: integer("produk_id").notNull().references(() => produk.id),
+  cabangId: integer("cabang_id").notNull().references(() => cabang.id),
+  qty: integer("qty").notNull().default(0),
+}, (t) => [
+  uniqueIndex("stok_cabang_produk_cabang_idx").on(t.produkId, t.cabangId),
+  check("chk_stok_non_negative", sql`${t.qty} >= 0`),
+]);
+
+export const kartuStok = sqliteTable("kartu_stok", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  produkId: integer("produk_id").notNull().references(() => produk.id),
+  cabangId: integer("cabang_id").notNull().references(() => cabang.id),
+  tipe: text("tipe", { enum: ["SALDO_AWAL", "MASUK", "KELUAR", "KOREKSI"] }).notNull(),
+  qty: integer("qty").notNull(),        // positif = masuk, negatif = keluar
+  qtySaldo: integer("qty_saldo").notNull(), // saldo setelah entri ini
+  keterangan: text("keterangan"),
+  refType: text("ref_type"),            // "order" | "manual" | null
+  refId: integer("ref_id"),
+  createdBy: integer("created_by").notNull().references(() => user.id),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
 // ── Tabel infrastruktur Better Auth (Tahap 2) ──────────────────────────────
 // Property key = nama field Better Auth (camelCase); kolom SQL = snake_case.
 // Verifikasi: drizzle-adapter mengakses schema[model] & schemaModel[fieldName].
@@ -275,6 +347,10 @@ export type Pembayaran = typeof pembayaran.$inferSelect;
 export type Issue = typeof issue.$inferSelect;
 export type DailyClosing = typeof dailyClosing.$inferSelect;
 export type AuditLog = typeof auditLog.$inferSelect;
+export type TripKanvas = typeof tripKanvas.$inferSelect;
+export type TripItem = typeof tripItem.$inferSelect;
 export type Session = typeof session.$inferSelect;
 export type Account = typeof account.$inferSelect;
 export type Verification = typeof verification.$inferSelect;
+export type StokCabang = typeof stokCabang.$inferSelect;
+export type KartuStok = typeof kartuStok.$inferSelect;

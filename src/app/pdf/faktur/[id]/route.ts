@@ -6,11 +6,14 @@ Main Functions: GET.
 Side Effects: Membaca database, menulis audit log, dan mengirim respons PDF.
 */
 
+import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/session";
 import { hasGlobalDataAccess, roleNameFromId } from "@/lib/roles";
 import { getOrderView } from "@/server/queries";
 import { renderFakturPdf } from "@/pdf/documents";
 import { writeAudit } from "@/server/audit";
+import { db } from "@/db";
+import { order } from "@/db/schema";
 
 export const runtime = "nodejs";
 
@@ -23,7 +26,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return new Response("Tidak berwenang", { status: 403 });
 
   const buf = await renderFakturPdf(o);
-  await writeAudit({ userId: Number(user.id), action: "print", table: "faktur", newValue: { orderId: o.id } });
+  await Promise.all([
+    db.update(order).set({ isPrinted: true }).where(eq(order.id, o.id)),
+    writeAudit({ userId: Number(user.id), action: "print", table: "faktur", newValue: { orderId: o.id } }),
+  ]);
   return new Response(new Uint8Array(buf), {
     headers: {
       "Content-Type": "application/pdf",

@@ -6,6 +6,7 @@ import {
   toko,
   cabang,
   user,
+  role,
   produk,
   hargaCabang,
   diskonToko,
@@ -15,6 +16,8 @@ import {
   pengiriman,
   dailyClosing,
   auditLog,
+  stokCabang,
+  kartuStok,
 } from "@/db/schema";
 import type { Alert, AlertLevel, OrderStatus, OrderView } from "@/lib/order-status";
 import { relativeTime } from "@/lib/format";
@@ -27,6 +30,7 @@ type OrderRow = {
   cabangId: number;
   tanggal: Date;
   status: string;
+  tipe: string;
   tokoNama: string;
   tokoAlamat: string | null;
   salesNama: string;
@@ -79,6 +83,7 @@ async function assemble(rows: OrderRow[]): Promise<OrderView[]> {
     cabangNama: r.cabangNama,
     tanggal: r.tanggal.toISOString(),
     status: r.status as OrderStatus,
+    tipe: (r.tipe as OrderView["tipe"]) ?? "taking_order",
     items: byOrder.get(r.id) ?? [],
   }));
 }
@@ -91,6 +96,7 @@ function baseOrderSelect() {
       cabangId: order.cabangId,
       tanggal: order.tanggal,
       status: order.status,
+      tipe: order.tipe,
       tokoNama: toko.nama,
       tokoAlamat: toko.alamat,
       salesNama: user.nama,
@@ -112,6 +118,22 @@ export async function listOrdersByStatus(
   const rows = await baseOrderSelect()
     .where(and(...conds))
     .orderBy(desc(order.tanggal), desc(order.id));
+  return assemble(rows);
+}
+
+// Nota approved belum dicetak — untuk panel Cetak Massal di gudang.
+export async function listUnprintedApproved(cabangId: number): Promise<OrderView[]> {
+  const rows = await baseOrderSelect()
+    .where(and(eq(order.status, "approved"), eq(order.isPrinted, false), eq(order.cabangId, cabangId)))
+    .orderBy(desc(order.id));
+  return assemble(rows);
+}
+
+// Nota approved belum masuk pick list — untuk aggregate pick list.
+export async function listUnPickListedApproved(cabangId: number): Promise<OrderView[]> {
+  const rows = await baseOrderSelect()
+    .where(and(eq(order.status, "approved"), eq(order.isPickListed, false), eq(order.cabangId, cabangId)))
+    .orderBy(desc(order.id));
   return assemble(rows);
 }
 
@@ -272,13 +294,21 @@ function startOfToday(): Date {
   return d;
 }
 
-export async function ownerDashboard() {
+export async function ownerDashboard(filterCabangId?: number | null) {
   const today = startOfToday();
   const yesterday = new Date(today.getTime() - 86400000);
 
   const sumPayments = async (from: Date, to?: Date) => {
     const conds = [gte(pembayaran.tanggalBayar, from)];
     if (to) conds.push(lt(pembayaran.tanggalBayar, to));
+    if (filterCabangId != null) {
+      const [r] = await db
+        .select({ s: sql<number>`coalesce(sum(${pembayaran.jumlah}), 0)` })
+        .from(pembayaran)
+        .innerJoin(order, eq(pembayaran.orderId, order.id))
+        .where(and(...conds, eq(order.cabangId, filterCabangId)));
+      return Number(r?.s ?? 0);
+    }
     const [r] = await db
       .select({ s: sql<number>`coalesce(sum(${pembayaran.jumlah}), 0)` })
       .from(pembayaran)
@@ -290,9 +320,10 @@ export async function ownerDashboard() {
   const pendapatanKemarin = await sumPayments(yesterday, today);
 
   // Hitung order per status & per cabang.
-  const orders = await db
-    .select({ status: order.status, cabangId: order.cabangId })
-    .from(order);
+  const orderQuery = db.select({ status: order.status, cabangId: order.cabangId }).from(order);
+  const orders = filterCabangId != null
+    ? await orderQuery.where(eq(order.cabangId, filterCabangId))
+    : await orderQuery;
   const aktifStatus: OrderStatus[] = [
     "pending_approval",
     "approved",
@@ -318,8 +349,11 @@ export async function ownerDashboard() {
     time: relativeTime(i.waktu.toISOString(), now),
   }));
 
-  // Ringkasan per cabang.
-  const cabangs = await db.select({ id: cabang.id, nama: cabang.nama }).from(cabang);
+  // Ringkasan per cabang (filter ke satu cabang jika dipilih).
+  const allCabangs = await db.select({ id: cabang.id, nama: cabang.nama }).from(cabang);
+  const cabangs = filterCabangId != null
+    ? allCabangs.filter((c) => c.id === filterCabangId)
+    : allCabangs;
   const ringkasan = await Promise.all(
     cabangs.map(async (c) => {
       const [rev] = await db
@@ -390,6 +424,39 @@ export async function listHargaAll() {
     .innerJoin(cabang, eq(hargaCabang.cabangId, cabang.id))
     .orderBy(cabang.nama, produk.nama);
 }
+// Stok per (produk, cabang) — untuk panel Master Produk.
+export async function listStokAll() {
+  return db
+    .select({
+      produkId: stokCabang.produkId,
+      cabangId: stokCabang.cabangId,
+      qty: stokCabang.qty,
+      cabangNama: cabang.nama,
+    })
+    .from(stokCabang)
+    .innerJoin(cabang, eq(stokCabang.cabangId, cabang.id))
+    .orderBy(stokCabang.produkId, cabang.nama);
+}
+
+// Kartu stok (ledger) untuk satu produk di satu cabang.
+export async function listKartuStok(produkId: number, cabangId: number) {
+  return db
+    .select({
+      id: kartuStok.id,
+      tipe: kartuStok.tipe,
+      qty: kartuStok.qty,
+      qtySaldo: kartuStok.qtySaldo,
+      keterangan: kartuStok.keterangan,
+      createdAt: kartuStok.createdAt,
+      createdByNama: user.nama,
+    })
+    .from(kartuStok)
+    .innerJoin(user, eq(kartuStok.createdBy, user.id))
+    .where(and(eq(kartuStok.produkId, produkId), eq(kartuStok.cabangId, cabangId)))
+    .orderBy(desc(kartuStok.createdAt))
+    .limit(100);
+}
+
 export async function listDiskonAll() {
   return db
     .select({
@@ -409,6 +476,25 @@ export async function listDiskonAll() {
     .orderBy(toko.nama, produk.nama);
 }
 
+// Semua user dengan nama role dan cabang — untuk panel Manajemen Pengguna.
+export async function listUsersAll() {
+  return db
+    .select({
+      id: user.id,
+      nama: user.nama,
+      email: user.email,
+      roleId: user.roleId,
+      roleName: role.roleName,
+      cabangId: user.cabangId,
+      cabangNama: cabang.nama,
+      createdAt: user.createdAt,
+    })
+    .from(user)
+    .innerJoin(role, eq(user.roleId, role.id))
+    .innerJoin(cabang, eq(user.cabangId, cabang.id))
+    .orderBy(user.roleId, user.nama);
+}
+
 // ── Audit Trail (Owner) ──────────────────────────────────────────────────────
 export async function listAudit(limit = 150) {
   return db
@@ -419,6 +505,7 @@ export async function listAudit(limit = 150) {
       oldValue: auditLog.oldValue,
       newValue: auditLog.newValue,
       ts: auditLog.timestamp,
+      userId: auditLog.userId,
       nama: user.nama,
       roleId: user.roleId,
     })
@@ -454,6 +541,83 @@ export const DIVISI_ORDER = [
   "delivery",
   "incaso",
 ] as const;
+
+// H-1 sudah dikunci? true jika tidak ada record H-1 (hari pertama) ATAU isLocked=true.
+// false hanya jika record H-1 ADA tapi belum dikunci → blokir operasi hari ini.
+export async function isYesterdayLocked(cabangId: number): Promise<boolean> {
+  const today = startOfToday();
+  const yesterday = new Date(today.getTime() - 86400000);
+  const key = dateKey(yesterday);
+  const [row] = await db
+    .select({ locked: dailyClosing.isLocked })
+    .from(dailyClosing)
+    .where(and(eq(dailyClosing.cabangId, cabangId), eq(dailyClosing.tanggal, key)))
+    .limit(1);
+  if (!row) return true; // Tidak ada record H-1 = hari pertama / gap → izinkan
+  return !!row.locked;
+}
+
+// Berapa order yang memblokir tiap divisi untuk closing hari ini?
+// incaso: delivered orders tanpa pembayaran DAN tanpa issue = benar-benar terbengkalai.
+export async function getClosingBlockers(
+  cabangId: number,
+  tanggal: string,
+): Promise<Record<string, number>> {
+  const dayStart = new Date(`${tanggal}T00:00:00`);
+  const dayEnd = new Date(`${tanggal}T23:59:59.999`);
+  const dayRange = [gte(order.tanggal, dayStart), lt(order.tanggal, dayEnd)];
+
+  const count = (rows: { n: number }[]) => rows[0]?.n ?? 0;
+
+  const [adminRows, gudangRows, deliveryRows] = await Promise.all([
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(order)
+      .where(and(eq(order.cabangId, cabangId), eq(order.status, "pending_approval"), ...dayRange)),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(order)
+      .where(and(eq(order.cabangId, cabangId), eq(order.status, "approved"), ...dayRange)),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(order)
+      .where(and(eq(order.cabangId, cabangId), eq(order.status, "ready_to_ship"), ...dayRange)),
+  ]);
+
+  // Incaso: delivered orders tanpa pembayaran dan tanpa issue.
+  const deliveredIds = await db
+    .select({ id: order.id })
+    .from(order)
+    .where(and(eq(order.cabangId, cabangId), eq(order.status, "delivered"), ...dayRange));
+
+  let incasoBlockers = 0;
+  if (deliveredIds.length > 0) {
+    const ids = deliveredIds.map((r) => r.id);
+    const [withPayment, withIssue] = await Promise.all([
+      db
+        .select({ orderId: pembayaran.orderId })
+        .from(pembayaran)
+        .where(inArray(pembayaran.orderId, ids)),
+      db
+        .select({ orderId: issue.orderId })
+        .from(issue)
+        .where(inArray(issue.orderId, ids)),
+    ]);
+    const resolved = new Set([
+      ...withPayment.map((r) => r.orderId),
+      ...withIssue.map((r) => r.orderId),
+    ]);
+    incasoBlockers = ids.filter((id) => !resolved.has(id)).length;
+  }
+
+  return {
+    sales: 0,
+    admin_fakturist: count(adminRows),
+    gudang: count(gudangRows),
+    delivery: count(deliveryRows),
+    incaso: incasoBlockers,
+  };
+}
 
 // State closing hari ini untuk sebuah cabang: status per divisi (daily_closing),
 // siapa/kapan menutup & teguran (diturunkan dari audit_log).
