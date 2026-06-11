@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   order,
@@ -19,6 +19,8 @@ import {
   auditLog,
   stokCabang,
   kartuStok,
+  tandaTerima,
+  tandaTerimaItem,
 } from "@/db/schema";
 import type { Alert, AlertLevel, OrderStatus, OrderView } from "@/lib/order-status";
 import { relativeTime } from "@/lib/format";
@@ -514,6 +516,74 @@ export async function listDiskonAll() {
     .innerJoin(toko, eq(diskonToko.tokoId, toko.id))
     .innerJoin(produk, eq(diskonToko.produkId, produk.id))
     .orderBy(toko.nama, produk.nama);
+}
+
+// ── Tanda Terima ─────────────────────────────────────────────────────────────
+
+// Order approved yang belum masuk tanda terima manapun — untuk pembuatan TT baru.
+export async function listOrdersForTandaTerima(cabangId: number): Promise<OrderView[]> {
+  const rows = await baseOrderSelect()
+    .leftJoin(tandaTerimaItem, eq(tandaTerimaItem.orderId, order.id))
+    .where(and(eq(order.status, "approved"), eq(order.cabangId, cabangId), isNull(tandaTerimaItem.id)))
+    .orderBy(order.id);
+  return assemble(rows);
+}
+
+// Order berdasarkan ID spesifik — untuk PDF tanda terima.
+export async function listOrdersByIds(ids: number[]): Promise<OrderView[]> {
+  if (!ids.length) return [];
+  const rows = await baseOrderSelect().where(inArray(order.id, ids)).orderBy(order.id);
+  return assemble(rows);
+}
+
+export async function listTandaTerimaForAdmin(cabangId: number) {
+  return db
+    .select({
+      id: tandaTerima.id,
+      tanggal: tandaTerima.tanggal,
+      status: tandaTerima.status,
+      adminNama: user.nama,
+      jumlahNota: sql<number>`(SELECT COUNT(*) FROM tanda_terima_item WHERE tanda_terima_id = ${tandaTerima.id})`,
+    })
+    .from(tandaTerima)
+    .innerJoin(user, eq(tandaTerima.adminUserId, user.id))
+    .where(eq(tandaTerima.cabangId, cabangId))
+    .orderBy(desc(tandaTerima.id))
+    .limit(20);
+}
+
+export async function listPendingTandaTerimaForGudang(cabangId: number) {
+  return db
+    .select({
+      id: tandaTerima.id,
+      cabangId: tandaTerima.cabangId,
+      tanggal: tandaTerima.tanggal,
+      status: tandaTerima.status,
+      adminNama: user.nama,
+      cabangNama: cabang.nama,
+      buktiUrl: tandaTerima.buktiUrl,
+    })
+    .from(tandaTerima)
+    .innerJoin(user, eq(tandaTerima.adminUserId, user.id))
+    .innerJoin(cabang, eq(tandaTerima.cabangId, cabang.id))
+    .where(and(eq(tandaTerima.cabangId, cabangId), eq(tandaTerima.status, "pending")))
+    .orderBy(desc(tandaTerima.id));
+}
+
+export async function getTandaTerimaItems(ttId: number) {
+  return db
+    .select({
+      id: tandaTerimaItem.id,
+      orderId: tandaTerimaItem.orderId,
+      status: tandaTerimaItem.status,
+      catatan: tandaTerimaItem.catatan,
+      tokoNama: toko.nama,
+    })
+    .from(tandaTerimaItem)
+    .innerJoin(order, eq(tandaTerimaItem.orderId, order.id))
+    .innerJoin(toko, eq(order.tokoId, toko.id))
+    .where(eq(tandaTerimaItem.tandaTerimaId, ttId))
+    .orderBy(tandaTerimaItem.orderId);
 }
 
 // Semua user dengan nama role dan cabang — untuk panel Manajemen Pengguna.

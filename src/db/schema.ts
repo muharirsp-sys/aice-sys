@@ -116,6 +116,28 @@ export const order = sqliteTable("order", {
   isPickListed: integer("is_pick_listed", { mode: "boolean" }).notNull().default(false),
 }, (t) => [uniqueIndex("order_share_token_idx").on(t.shareToken)]);
 
+// ── Tanda Terima ────────────────────────────────────────────────────────────
+// Admin/fakturist membuat tanda terima dari order approved, gudang konfirmasi penerimaan.
+
+export const tandaTerima = sqliteTable("tanda_terima", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cabangId: integer("cabang_id").notNull().references(() => cabang.id),
+  adminUserId: integer("admin_user_id").notNull().references(() => user.id),
+  tanggal: integer("tanggal", { mode: "timestamp" }).notNull(),
+  status: text("status").notNull().default("pending"), // pending | dikonfirmasi
+  buktiUrl: text("bukti_url"),
+  gudangUserId: integer("gudang_user_id").references(() => user.id),
+  dikonfirmasiAt: integer("dikonfirmasi_at", { mode: "timestamp" }),
+});
+
+export const tandaTerimaItem = sqliteTable("tanda_terima_item", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tandaTerimaId: integer("tanda_terima_id").notNull().references(() => tandaTerima.id),
+  orderId: integer("order_id").notNull().references(() => order.id),
+  status: text("status").notNull().default("pending"), // pending | sesuai | tidak_sesuai
+  catatan: text("catatan"),
+});
+
 export const produkSatuan = sqliteTable("produk_satuan", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   produkId: integer("produk_id").notNull().references(() => produk.id),
@@ -363,3 +385,5 @@ export type Verification = typeof verification.$inferSelect;
 export type StokCabang = typeof stokCabang.$inferSelect;
 export type KartuStok = typeof kartuStok.$inferSelect;
 export type ProdukSatuan = typeof produkSatuan.$inferSelect;
+export type TandaTerima = typeof tandaTerima.$inferSelect;
+export type TandaTerimaItem = typeof tandaTerimaItem.$inferSelect;

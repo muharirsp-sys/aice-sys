@@ -404,6 +404,71 @@ function AggPickListDoc({ orders, cabangNama, tanggal }: { orders: OrderView[]; 
   );
 }
 
+// ── Tanda Terima ─────────────────────────────────────────────────────────────
+function TandaTerimaDoc({
+  tt,
+  orders,
+  cabangNama,
+}: {
+  tt: { id: number; tanggal: string; adminNama: string };
+  orders: OrderView[];
+  cabangNama: string;
+}) {
+  const totalNilai = orders.reduce((s, o) => s + totalItems(o.items), 0);
+  const serialNo = `TT-${String(tt.id).padStart(5, "0")}`;
+  return (
+    <Document title={`Tanda Terima ${serialNo}`}>
+      <Page size="A4" style={s.page}>
+        <Kop
+          title="Tanda Terima"
+          docNo={serialNo}
+          meta={[
+            { label: "Cabang", value: cabangNama },
+            { label: "Tanggal", value: tglPendek(tt.tanggal) },
+            { label: "Fakturist", value: tt.adminNama },
+            { label: "Jml Nota", value: `${orders.length} nota` },
+          ]}
+        />
+        <Text style={s.sectionTitle}>Daftar Nota</Text>
+        <View style={s.table}>
+          <View style={s.thead}>
+            <Text style={[s.th, { width: 30 }]}>No.</Text>
+            <Text style={[s.th, { width: 55 }]}>Nota</Text>
+            <Text style={[s.th, { flex: 3 }]}>Toko</Text>
+            <Text style={[s.th, { flex: 1, textAlign: "right" }]}>Item</Text>
+            <Text style={[s.th, { flex: 2, textAlign: "right" }]}>Total</Text>
+            <Text style={[s.th, { width: 40, textAlign: "center" }]}>Sesuai</Text>
+            <Text style={[s.th, { width: 40, textAlign: "center" }]}>Tidak</Text>
+          </View>
+          {orders.map((o, idx) => (
+            <View key={o.id} style={idx % 2 ? s.trZebra : s.tr}>
+              <Text style={[s.td, { width: 30 }]}>{idx + 1}</Text>
+              <Text style={[s.td, { width: 55, fontFamily: "Courier" }]}>INV-{o.id}</Text>
+              <Text style={[s.td, { flex: 3 }]}>{o.tokoNama}</Text>
+              <Text style={[s.td, s.num, { flex: 1 }]}>{o.items.length}</Text>
+              <Text style={[s.td, s.num, s.bold, { flex: 2 }]}>{rupiah(totalItems(o.items))}</Text>
+              <View style={[s.td, { width: 40, alignItems: "center" }]}><View style={s.checkbox} /></View>
+              <View style={[s.td, { width: 40, alignItems: "center" }]}><View style={s.checkbox} /></View>
+            </View>
+          ))}
+          <View style={[s.tr, { backgroundColor: C.head }]}>
+            <Text style={[s.td, s.bold, { width: 85, flex: 0 }]}>Total</Text>
+            <Text style={[s.td, { flex: 3 }]} />
+            <Text style={[s.td, s.num, { flex: 1 }]} />
+            <Text style={[s.td, s.num, s.bold, { flex: 2 }]}>{rupiah(totalNilai)}</Text>
+            <Text style={[s.td, { width: 80 }]} />
+          </View>
+        </View>
+        <View style={s.signRow}>
+          <View style={s.signBox}><Text style={s.signLine}>Disiapkan (Fakturist)</Text></View>
+          <View style={s.signBox}><Text style={s.signLine}>Diterima (Gudang)</Text></View>
+        </View>
+        <Footer />
+      </Page>
+    </Document>
+  );
+}
+
 // ── Render helpers (server) ──────────────────────────────────────────────────
 export const renderFakturPdf = (o: OrderView) => renderToBuffer(<FakturDoc o={o} />);
 export const renderPickListPdf = (o: OrderView) => renderToBuffer(<PickListDoc o={o} />);
@@ -413,3 +478,8 @@ export const renderKwitansiPdf = (o: OrderView, jumlah: number, metode: string) 
   renderToBuffer(<KwitansiDoc o={o} jumlah={jumlah} metode={metode} />);
 export const renderAggPickListPdf = (orders: OrderView[], cabangNama: string, tanggal: string) =>
   renderToBuffer(<AggPickListDoc orders={orders} cabangNama={cabangNama} tanggal={tanggal} />);
+export const renderTandaTerimaPdf = (
+  tt: { id: number; tanggal: string; adminNama: string },
+  orders: OrderView[],
+  cabangNama: string,
+) => renderToBuffer(<TandaTerimaDoc tt={tt} orders={orders} cabangNama={cabangNama} />);
