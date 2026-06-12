@@ -45,9 +45,9 @@ export function AuditFilterBar({
 
   return (
     <div className="rounded-lg border bg-card p-3">
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         {/* Pencarian wildcard */}
-        <div className="lg:col-span-2">
+        <div className="sm:col-span-2 lg:col-span-2">
           <label className={labelCls}>Cari (No. ref / order / detail)</label>
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -62,7 +62,7 @@ export function AuditFilterBar({
         </div>
 
         {/* Pelaku */}
-        <div>
+        <div className="lg:col-span-1">
           <label className={labelCls}>Pelaku</label>
           <select
             value={value.pelaku}
@@ -79,7 +79,7 @@ export function AuditFilterBar({
         </div>
 
         {/* Aksi */}
-        <div>
+        <div className="lg:col-span-1">
           <label className={labelCls}>Jenis Aksi</label>
           <select
             value={value.aksi}
@@ -95,26 +95,26 @@ export function AuditFilterBar({
           </select>
         </div>
 
-        {/* Rentang tanggal */}
-        <div className="flex gap-2">
-          <div className="flex-1">
-            <label className={labelCls}>Dari</label>
-            <input
-              type="date"
-              value={value.dari}
-              onChange={(e) => set({ dari: e.target.value })}
-              className={input}
-            />
-          </div>
-          <div className="flex-1">
-            <label className={labelCls}>Sampai</label>
-            <input
-              type="date"
-              value={value.sampai}
-              onChange={(e) => set({ sampai: e.target.value })}
-              className={input}
-            />
-          </div>
+        {/* Dari */}
+        <div className="lg:col-span-1">
+          <label className={labelCls}>Dari</label>
+          <input
+            type="date"
+            value={value.dari}
+            onChange={(e) => set({ dari: e.target.value })}
+            className={input}
+          />
+        </div>
+
+        {/* Sampai */}
+        <div className="lg:col-span-1">
+          <label className={labelCls}>Sampai</label>
+          <input
+            type="date"
+            value={value.sampai}
+            onChange={(e) => set({ sampai: e.target.value })}
+            className={input}
+          />
         </div>
       </div>
 
