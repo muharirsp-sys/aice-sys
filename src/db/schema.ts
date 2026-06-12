@@ -13,7 +13,7 @@
 // user.email dan produk.sku (bukan kolom/tabel baru) — natural key yang dibutuhkan
 // untuk login & identifikasi produk.
 
-import { sqliteTable, integer, text, uniqueIndex, check } from "drizzle-orm/sqlite-core";
+import { sqliteTable, integer, text, uniqueIndex, check, index } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const cabang = sqliteTable("cabang", {
@@ -286,24 +286,37 @@ export const stokCabang = sqliteTable("stok_cabang", {
   produkId: integer("produk_id").notNull().references(() => produk.id),
   cabangId: integer("cabang_id").notNull().references(() => cabang.id),
   qty: integer("qty").notNull().default(0),
+  // updatedAt nullable agar ALTER TABLE ADD COLUMN aman di DB yang sudah punya baris.
+  // Semua insert/update lewat mutateStock akan selalu mengisi nilai ini.
+  updatedAt: integer("updated_at", { mode: "timestamp" }),
 }, (t) => [
   uniqueIndex("stok_cabang_produk_cabang_idx").on(t.produkId, t.cabangId),
   check("chk_stok_non_negative", sql`${t.qty} >= 0`),
 ]);
 
+// kartu_stok = ledger mutasi stok (stock_movement).
+// tipe: IN = stok masuk, OUT = stok keluar, ADJUSTMENT = koreksi/opname.
+// qty = nilai absolut mutasi; qtySaldo = saldo setelah mutasi (balanceAfter).
+// referenceId = no. faktur / PO / ref dokumen sumber.
 export const kartuStok = sqliteTable("kartu_stok", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   produkId: integer("produk_id").notNull().references(() => produk.id),
   cabangId: integer("cabang_id").notNull().references(() => cabang.id),
-  tipe: text("tipe", { enum: ["SALDO_AWAL", "MASUK", "KELUAR", "KOREKSI"] }).notNull(),
-  qty: integer("qty").notNull(),        // positif = masuk, negatif = keluar
-  qtySaldo: integer("qty_saldo").notNull(), // saldo setelah entri ini
+  // Enum mencakup nilai lama (MASUK/KELUAR/KOREKSI) untuk backward compat baca data existing.
+  // Semua insert baru wajib menggunakan IN / OUT / ADJUSTMENT / SALDO_AWAL.
+  tipe: text("tipe", { enum: ["IN", "OUT", "ADJUSTMENT", "SALDO_AWAL", "MASUK", "KELUAR", "KOREKSI"] }).notNull(),
+  qty: integer("qty").notNull(),           // nilai absolut mutasi
+  qtySaldo: integer("qty_saldo").notNull(), // saldo setelah mutasi (balanceAfter)
+  referenceId: text("reference_id"),       // no. faktur / PO / ref dokumen
   keterangan: text("keterangan"),
-  refType: text("ref_type"),            // "order" | "manual" | null
+  refType: text("ref_type"),               // "order" | "manual" | null
   refId: integer("ref_id"),
   createdBy: integer("created_by").notNull().references(() => user.id),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-});
+}, (t) => [
+  // Index komposit untuk query kartu stok per cabang diurutkan terbaru (hot-path halaman inventory).
+  index("kartu_stok_cabang_created_idx").on(t.cabangId, t.createdAt),
+]);
 
 // ── Tabel infrastruktur Better Auth (Tahap 2) ──────────────────────────────
 // Property key = nama field Better Auth (camelCase); kolom SQL = snake_case.
@@ -407,6 +420,9 @@ export type Account = typeof account.$inferSelect;
 export type Verification = typeof verification.$inferSelect;
 export type StokCabang = typeof stokCabang.$inferSelect;
 export type KartuStok = typeof kartuStok.$inferSelect;
+// Alias types for inventory module (maps to stokCabang / kartuStok).
+export type Inventory = StokCabang;
+export type StockMovement = KartuStok;
 export type ProdukSatuan = typeof produkSatuan.$inferSelect;
 export type TandaTerima = typeof tandaTerima.$inferSelect;
 export type TandaTerimaItem = typeof tandaTerimaItem.$inferSelect;

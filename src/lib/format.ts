@@ -20,6 +20,20 @@ export function tglPendek(iso: string): string {
   });
 }
 
+// Tanggal + waktu pendek (dipakai di kartu stok / audit log).
+export function dateTime(d: Date | string): string {
+  return new Date(d).toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+// Gabungkan semua helper ke satu namespace agar bisa dipakai sebagai `format.xxx`.
+export const format = { rupiah, persenDelta, tglPendek, dateTime };
+
 // Waktu relatif ("8 menit lalu", "2 jam lalu").
 export function relativeTime(iso: string, now: number = Date.now()): string {
   const diff = Math.max(0, now - new Date(iso).getTime());

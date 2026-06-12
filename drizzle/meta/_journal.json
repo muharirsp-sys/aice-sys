@@ -57,6 +57,13 @@
       "when": 1781193860879,
       "tag": "0007_old_molly_hayes",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1781278023302,
+      "tag": "0008_strong_killraven",
+      "breakpoints": true
     }
   ]
 }
