@@ -15,6 +15,7 @@ type TTRow = {
   status: string;
   adminNama: string;
   jumlahNota: number;
+  tidakSesuaiCount: number;
 };
 
 export function TandaTerimaAdminPanel({
@@ -147,6 +148,11 @@ export function TandaTerimaAdminPanel({
                   >
                     {tt.status === "dikonfirmasi" ? "Dikonfirmasi Gudang" : "Menunggu Gudang"}
                   </span>
+                  {tt.tidakSesuaiCount > 0 && (
+                    <span className="inline-flex rounded-full bg-critical/15 px-2 py-0.5 text-xs font-semibold text-critical">
+                      {tt.tidakSesuaiCount} tidak sesuai
+                    </span>
+                  )}
                 </div>
                 <a
                   href={`/pdf/tanda-terima/${tt.id}`}

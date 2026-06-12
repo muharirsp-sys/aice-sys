@@ -523,11 +523,24 @@ export async function listDiskonAll() {
 
 // ── Tanda Terima ─────────────────────────────────────────────────────────────
 
-// Order approved yang belum masuk tanda terima manapun — untuk pembuatan TT baru.
+// Order approved yang siap masuk TT baru:
+// - Belum pernah masuk TT, ATAU
+// - Sudah masuk TT yang dikonfirmasi tapi dengan status "tidak_sesuai" (bisa di-TT ulang).
+// Dikecualikan: order dalam TT pending (sedang diproses) atau sudah "sesuai" (sudah selesai).
 export async function listOrdersForTandaTerima(cabangId: number): Promise<OrderView[]> {
   const rows = await baseOrderSelect()
-    .leftJoin(tandaTerimaItem, eq(tandaTerimaItem.orderId, order.id))
-    .where(and(eq(order.status, "approved"), eq(order.cabangId, cabangId), isNull(tandaTerimaItem.id)))
+    .where(
+      and(
+        eq(order.status, "approved"),
+        eq(order.cabangId, cabangId),
+        sql`NOT EXISTS (
+          SELECT 1 FROM tanda_terima_item tti
+          JOIN tanda_terima tt ON tti.tanda_terima_id = tt.id
+          WHERE tti.order_id = ${order.id}
+          AND (tt.status = 'pending' OR tti.status = 'sesuai')
+        )`,
+      ),
+    )
     .orderBy(order.id);
   return assemble(rows);
 }
@@ -547,6 +560,7 @@ export async function listTandaTerimaForAdmin(cabangId: number) {
       status: tandaTerima.status,
       adminNama: user.nama,
       jumlahNota: sql<number>`(SELECT COUNT(*) FROM tanda_terima_item WHERE tanda_terima_id = ${tandaTerima.id})`,
+      tidakSesuaiCount: sql<number>`(SELECT COUNT(*) FROM tanda_terima_item WHERE tanda_terima_id = ${tandaTerima.id} AND status = 'tidak_sesuai')`,
     })
     .from(tandaTerima)
     .innerJoin(user, eq(tandaTerima.adminUserId, user.id))

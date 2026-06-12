@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { tandaTerima, tandaTerimaItem, order } from "@/db/schema";
+import { tandaTerima, tandaTerimaItem, order, issue } from "@/db/schema";
 import { getCurrentUser } from "@/lib/session";
 import { canAccessRole, roleNameFromId } from "@/lib/roles";
 import { saveUpload } from "./upload";
@@ -112,7 +112,28 @@ export async function konfirmasiTandaTerima(formData: FormData): Promise<ActionR
     .set({ status: "dikonfirmasi", buktiUrl, gudangUserId: a.user.id, dikonfirmasiAt: new Date() })
     .where(eq(tandaTerima.id, ttId));
 
-  const tidakSesuai = items.filter((i) => i.status === "tidak_sesuai").length;
+  // Nota sesuai → langsung ready_to_ship
+  const sesuaiIds = items.filter((i) => i.status === "sesuai").map((i) => i.orderId);
+  if (sesuaiIds.length > 0) {
+    await db.update(order).set({ status: "ready_to_ship" }).where(inArray(order.id, sesuaiIds));
+  }
+
+  // Nota tidak sesuai → buat issue supaya admin & owner tahu
+  const tidakSesuaiItems = items.filter((i) => i.status === "tidak_sesuai");
+  const now = new Date();
+  for (const item of tidakSesuaiItems) {
+    const catatan = item.catatan ? ` — ${item.catatan}` : "";
+    await db.insert(issue).values({
+      orderId: item.orderId,
+      pelaporUserId: a.user.id,
+      rolePelapor: "gudang",
+      deskripsi: `Tidak sesuai pada TT-${String(ttId).padStart(5, "0")}${catatan}`,
+      waktuLapor: now,
+      status: false,
+    });
+  }
+
+  const tidakSesuai = tidakSesuaiItems.length;
   await writeAudit({
     userId: a.user.id,
     action: "konfirmasi_tanda_terima",

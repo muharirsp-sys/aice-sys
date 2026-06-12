@@ -26,10 +26,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return new Response("Tidak berwenang", { status: 403 });
 
   const buf = await renderFakturPdf(o);
-  await Promise.all([
-    db.update(order).set({ isPrinted: true }).where(eq(order.id, o.id)),
+  const ops: Promise<unknown>[] = [
     writeAudit({ userId: Number(user.id), action: "print", table: "faktur", newValue: { orderId: o.id } }),
-  ]);
+  ];
+  // Tandai tercetak hanya setelah approved — mencegah isPrinted prematur saat preview pending.
+  if (o.status === "approved") {
+    ops.push(db.update(order).set({ isPrinted: true }).where(eq(order.id, o.id)));
+  }
+  await Promise.all(ops);
   return new Response(new Uint8Array(buf), {
     headers: {
       "Content-Type": "application/pdf",

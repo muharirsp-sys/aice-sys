@@ -3,14 +3,12 @@ import { requireRole } from "@/lib/session";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { PageHeader } from "@/components/ui/page-header";
 import { GudangList } from "@/components/gudang/gudang-list";
-import { CetakMassalPanel } from "@/components/gudang/cetak-massal-panel";
 import { TandaTerimaGudangPanel } from "@/components/gudang/tanda-terima-gudang-panel";
 import { KendalaLaporPanel } from "@/components/gudang/kendala-lapor-panel";
 import { GudangMuatanPanel, type GudangTripView } from "@/components/kanvas/gudang-muatan-panel";
 import { btn } from "@/lib/ui";
 import {
   listOrdersByStatus,
-  listUnprintedApproved,
   listUnPickListedApproved,
   listPendingTandaTerimaForGudang,
   getTandaTerimaItems,
@@ -20,16 +18,14 @@ import { getTripDetail, listTripsForGudang } from "@/server/kanvas-queries";
 
 export default async function GudangPage() {
   const user = await requireRole("gudang");
-  const [approved, tripRows, unprinted, unpicklisted, rawPendingTTs, ordersForKendala] = await Promise.all([
+  const [approved, tripRows, unpicklisted, rawPendingTTs, ordersForKendala] = await Promise.all([
     listOrdersByStatus(["approved"], user.cabangId),
     listTripsForGudang(user.cabangId),
-    listUnprintedApproved(user.cabangId),
     listUnPickListedApproved(user.cabangId),
     listPendingTandaTerimaForGudang(user.cabangId),
     listOrdersForKendala(user.cabangId),
   ]);
 
-  // Fetch items for each pending TT and serialize dates
   const pendingTTs = await Promise.all(
     rawPendingTTs.map(async (tt) => ({
       id: tt.id,
@@ -39,7 +35,6 @@ export default async function GudangPage() {
     })),
   );
 
-  // Lengkapi tiap trip antrean dengan rincian item (muat/terjual/kembali).
   const trips: GudangTripView[] = [];
   for (const t of tripRows) {
     const d = await getTripDetail(t.id);
@@ -64,7 +59,7 @@ export default async function GudangPage() {
     <DashboardShell userName={user.name} roleId={user.roleId} cabangId={user.cabangId}>
       <PageHeader
         title="Persiapan Gudang"
-        desc={`${approved.length} nota disetujui · ${unprinted.length} belum dicetak`}
+        desc={`${approved.length} nota disetujui · ${unpicklisted.length} belum pick list`}
       >
         <a
           href="/pdf/picklist-agg"
@@ -85,7 +80,6 @@ export default async function GudangPage() {
         </section>
       )}
 
-      <CetakMassalPanel unprinted={unprinted} />
       <GudangList orders={approved} />
 
       {ordersForKendala.length > 0 && (
