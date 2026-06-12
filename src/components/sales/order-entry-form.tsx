@@ -261,7 +261,7 @@ export function OrderEntryForm({
               </div>
               <div>
                 <label className={label}>Satuan</label>
-                {l.produkId > 0 && satuansOf(l.produkId).length > 1 ? (
+                {l.produkId > 0 ? (
                   <select
                     className={input}
                     value={l.satuanId}
@@ -272,9 +272,7 @@ export function OrderEntryForm({
                     ))}
                   </select>
                 ) : (
-                  <p className={`py-2 text-sm font-semibold tabular ${l.produkId > 0 ? "text-foreground" : "text-muted-foreground"}`}>
-                    {l.produkId > 0 ? satuansOf(l.produkId)[0]?.satuan ?? "—" : "—"}
-                  </p>
+                  <p className="py-2 text-sm text-muted-foreground">—</p>
                 )}
               </div>
               <div>
