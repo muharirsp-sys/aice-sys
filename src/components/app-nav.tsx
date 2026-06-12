@@ -21,6 +21,7 @@ import {
   ScrollText,
   Database,
   FileSpreadsheet,
+  Boxes,
 } from "lucide-react";
 import type { RoleName } from "@/lib/roles";
 
@@ -33,6 +34,7 @@ const LINKS = [
   { href: "/incaso", label: "Incaso", Icon: Wallet },
   { href: "/closing", label: "Closing", Icon: CalendarCheck },
   { href: "/master", label: "Master", Icon: Database },
+  { href: "/dashboard/inventory", label: "Inventori", Icon: Boxes },
   { href: "/laporan", label: "Laporan", Icon: FileSpreadsheet },
   { href: "/audit", label: "Audit", Icon: ScrollText },
 ];
@@ -43,10 +45,10 @@ const ALL_PATHS = LINKS.map((link) => link.href);
 const ALLOWED: Record<RoleName, string[]> = {
   sales: ["/sales", "/closing"],
   admin_fakturist: ["/admin", "/closing"],
-  gudang: ["/gudang", "/closing"],
+  gudang: ["/gudang", "/dashboard/inventory", "/closing"],
   delivery: ["/delivery", "/closing"],
   incaso: ["/incaso", "/closing"],
-  owner: ["/owner", "/master", "/laporan", "/closing", "/audit"],
+  owner: ["/owner", "/master", "/dashboard/inventory", "/laporan", "/closing", "/audit"],
   super_admin: ALL_PATHS,
 };
 
