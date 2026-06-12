@@ -128,10 +128,30 @@ export async function listOrdersByStatus(
   return assemble(rows);
 }
 
-// Nota approved belum dicetak — untuk panel Cetak Massal di gudang.
+// Nota belum dicetak — approved atau ready_to_ship (faktur harus tersedia sebelum kirim).
 export async function listUnprintedApproved(cabangId: number): Promise<OrderView[]> {
   const rows = await baseOrderSelect()
-    .where(and(eq(order.status, "approved"), eq(order.isPrinted, false), eq(order.cabangId, cabangId)))
+    .where(and(
+      inArray(order.status, ["approved", "ready_to_ship"]),
+      eq(order.isPrinted, false),
+      eq(order.cabangId, cabangId),
+    ))
+    .orderBy(desc(order.id));
+  return assemble(rows);
+}
+
+// Order approved yang BELUM PERNAH masuk TT — untuk GudangList.
+// Order yang sudah pernah masuk TT (termasuk tidak_sesuai) harus di-TT ulang, bukan lewat GudangList.
+export async function listApprovedNotInPendingTT(cabangId: number): Promise<OrderView[]> {
+  const rows = await baseOrderSelect()
+    .where(and(
+      eq(order.status, "approved"),
+      eq(order.cabangId, cabangId),
+      sql`NOT EXISTS (
+        SELECT 1 FROM tanda_terima_item tti
+        WHERE tti.order_id = ${order.id}
+      )`,
+    ))
     .orderBy(desc(order.id));
   return assemble(rows);
 }
@@ -601,6 +621,77 @@ export async function getTandaTerimaItems(ttId: number) {
     .innerJoin(toko, eq(order.tokoId, toko.id))
     .where(eq(tandaTerimaItem.tandaTerimaId, ttId))
     .orderBy(tandaTerimaItem.orderId);
+}
+
+// ── Driver Loading ────────────────────────────────────────────────────────────
+
+// ready_to_ship yang BELUM dimuat driver (belum ada pengiriman record).
+export async function listReadyNotLoaded(cabangId: number): Promise<OrderView[]> {
+  const rows = await baseOrderSelect()
+    .where(and(
+      eq(order.status, "ready_to_ship"),
+      eq(order.cabangId, cabangId),
+      sql`NOT EXISTS (SELECT 1 FROM pengiriman p WHERE p.order_id = ${order.id})`,
+    ))
+    .orderBy(order.id);
+  return assemble(rows);
+}
+
+// ready_to_ship yang SUDAH dimuat (pengiriman.dikirim set) tapi belum diantar (diterima null).
+export async function listLoadedNotDelivered(cabangId: number): Promise<OrderView[]> {
+  const rows = await baseOrderSelect()
+    .where(and(
+      eq(order.status, "ready_to_ship"),
+      eq(order.cabangId, cabangId),
+      sql`EXISTS (SELECT 1 FROM pengiriman p WHERE p.order_id = ${order.id} AND p.dikirim IS NOT NULL AND p.diterima IS NULL)`,
+    ))
+    .orderBy(order.id);
+  return assemble(rows);
+}
+
+// TT items + order items per order — untuk panel konfirmasi TT gudang (qty aktual).
+export async function getTandaTerimaItemsWithOrderDetails(ttId: number) {
+  const ttItems = await db
+    .select({
+      id: tandaTerimaItem.id,
+      orderId: tandaTerimaItem.orderId,
+      status: tandaTerimaItem.status,
+      catatan: tandaTerimaItem.catatan,
+      tokoNama: toko.nama,
+    })
+    .from(tandaTerimaItem)
+    .innerJoin(order, eq(tandaTerimaItem.orderId, order.id))
+    .innerJoin(toko, eq(order.tokoId, toko.id))
+    .where(eq(tandaTerimaItem.tandaTerimaId, ttId))
+    .orderBy(tandaTerimaItem.orderId);
+
+  if (!ttItems.length) return [];
+
+  const orderIds = ttItems.map((i) => i.orderId);
+  const items = await db
+    .select({
+      orderId: orderItem.orderId,
+      orderItemId: orderItem.id,
+      nama: produk.nama,
+      satuan: sql<string>`COALESCE(${produkSatuan.satuan}, ${produk.satuan})`.as("satuan"),
+      qty: orderItem.qty,
+    })
+    .from(orderItem)
+    .innerJoin(produk, eq(orderItem.produkId, produk.id))
+    .leftJoin(produkSatuan, eq(orderItem.satuanId, produkSatuan.id))
+    .where(inArray(orderItem.orderId, orderIds));
+
+  const byOrder = new Map<number, typeof items>();
+  for (const it of items) {
+    const arr = byOrder.get(it.orderId) ?? [];
+    arr.push(it);
+    byOrder.set(it.orderId, arr);
+  }
+
+  return ttItems.map((tt) => ({
+    ...tt,
+    orderItems: byOrder.get(tt.orderId) ?? [],
+  }));
 }
 
 // Semua user dengan nama role dan cabang — untuk panel Manajemen Pengguna.

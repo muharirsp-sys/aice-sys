@@ -10,14 +10,14 @@ export function CetakMassalPanel({ unprinted }: { unprinted: OrderView[] }) {
   if (unprinted.length === 0)
     return (
       <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-        Semua nota sudah dicetak.
+        Semua faktur sudah dicetak.
       </p>
     );
 
   return (
     <section className="mb-4 rounded-lg border bg-card p-4">
       <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-        Nota Belum Dicetak ({unprinted.length})
+        Faktur Belum Dicetak ({unprinted.length})
       </h2>
       <div className="space-y-2">
         {unprinted.map((o) => (

@@ -42,19 +42,39 @@ export default async function AdminPage() {
         </a>
       </PageHeader>
 
-      <ApprovalList orders={pending} />
+      <section className="mb-8">
+        <div className="mb-3">
+          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Langkah 1 · Setujui Order ({pending.length})
+          </h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Cek detail order dari sales. Klik &ldquo;Setujui&rdquo; untuk lanjut ke cetak faktur.
+          </p>
+        </div>
+        <ApprovalList orders={pending} />
+      </section>
 
-      <section className="mt-8">
-        <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Cetak Faktur
-        </h2>
+      <section className="mb-8">
+        <div className="mb-3">
+          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Langkah 2 · Cetak Faktur ({unprinted.length})
+          </h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Cetak faktur untuk semua order yang sudah disetujui. Setelah dicetak, masukkan ke Tanda Terima di bawah.
+          </p>
+        </div>
         <CetakMassalPanel unprinted={unprinted} />
       </section>
 
-      <section className="mt-8">
-        <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Tanda Terima
-        </h2>
+      <section className="mb-8">
+        <div className="mb-3">
+          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Langkah 3 · Buat Tanda Terima
+          </h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Pilih faktur yang sudah dicetak, buat Tanda Terima, lalu serahkan ke gudang untuk konfirmasi barang.
+          </p>
+        </div>
         <TandaTerimaAdminPanel availableOrders={availableOrders} recentTTs={recentTTs} />
       </section>
     </DashboardShell>

@@ -2,18 +2,19 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { btn } from "@/lib/ui";
 import { laporKendalaItems } from "@/server/kendala-actions";
 import type { OrderView } from "@/lib/order-status";
 
-type Props = { orders: OrderView[] };
+type Props = { orders: OrderView[]; collapsible?: boolean };
 
 type ItemDraft = { selected: boolean; qtyLapor: string; catatan: string };
 
-export function KendalaLaporPanel({ orders }: Props) {
+export function KendalaLaporPanel({ orders, collapsible }: Props) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const [open, setOpen] = useState(!collapsible);
   const [orderId, setOrderId] = useState<number | "">("");
   const [drafts, setDrafts] = useState<Record<number, ItemDraft>>({});
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -77,17 +78,17 @@ export function KendalaLaporPanel({ orders }: Props) {
     });
   }
 
-  return (
+  const formContent = (
     <div className="space-y-4">
       <select
         className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
         value={orderId}
         onChange={(e) => handleOrderChange(e.target.value === "" ? "" : Number(e.target.value))}
       >
-        <option value="">— Pilih nota yang ada kendala barang —</option>
+        <option value="">— Pilih faktur yang ada kendala barang —</option>
         {orders.map((o) => (
           <option key={o.id} value={o.id}>
-            INV-{o.id} · {o.tokoNama} ({o.items.length} item)
+            Faktur #{o.id} · {o.tokoNama} ({o.items.length} item)
           </option>
         ))}
       </select>
@@ -162,4 +163,26 @@ export function KendalaLaporPanel({ orders }: Props) {
       )}
     </div>
   );
+
+  if (collapsible) {
+    return (
+      <div className="rounded-lg border">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+        >
+          <div>
+            <span className="text-sm font-semibold">Lapor Barang Kurang (jika ada)</span>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Buka hanya jika stok fisik gudang kurang dari yang dipesan.
+            </p>
+          </div>
+          {open ? <ChevronUp className="size-4 shrink-0" /> : <ChevronDown className="size-4 shrink-0" />}
+        </button>
+        {open && <div className="border-t px-4 pb-4 pt-3">{formContent}</div>}
+      </div>
+    );
+  }
+
+  return formContent;
 }

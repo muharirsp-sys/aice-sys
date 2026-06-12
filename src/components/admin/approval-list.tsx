@@ -17,13 +17,14 @@ export function ApprovalList({ orders }: { orders: OrderView[] }) {
   const [rejectId, setRejectId] = useState<number | null>(null);
   const [alasan, setAlasan] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [approvedBanner, setApprovedBanner] = useState(false);
 
   function approve(id: number) {
     setErr(null);
     startTransition(async () => {
       const r = await approveOrder(id);
       if (!r.ok) setErr(r.error);
-      else router.refresh();
+      else { setApprovedBanner(true); router.refresh(); }
     });
   }
   function approveAll() {
@@ -31,7 +32,7 @@ export function ApprovalList({ orders }: { orders: OrderView[] }) {
     startTransition(async () => {
       const r = await approveAllOrders(orders.map((o) => o.id));
       if (!r.ok) setErr(r.error);
-      else router.refresh();
+      else { setApprovedBanner(true); router.refresh(); }
     });
   }
   function confirmReject() {
@@ -49,11 +50,25 @@ export function ApprovalList({ orders }: { orders: OrderView[] }) {
   }
 
   if (orders.length === 0) {
-    return <p className="rounded-md border border-dashed p-6 text-center text-muted-foreground">Tidak ada order menunggu persetujuan.</p>;
+    return (
+      <>
+        {approvedBanner && (
+          <div className="mb-3 rounded-md border border-ok bg-ok/10 p-3 text-sm font-semibold text-ok">
+            Disetujui. Sekarang cetak fakturnya di bagian &ldquo;Cetak Faktur&rdquo; di bawah.
+          </div>
+        )}
+        <p className="rounded-md border border-dashed p-6 text-center text-muted-foreground">Tidak ada order menunggu persetujuan.</p>
+      </>
+    );
   }
 
   return (
     <>
+      {approvedBanner && (
+        <div className="mb-3 rounded-md border border-ok bg-ok/10 p-3 text-sm font-semibold text-ok">
+          Disetujui. Sekarang cetak fakturnya di bagian &ldquo;Cetak Faktur&rdquo; di bawah.
+        </div>
+      )}
       {err && (
         <p className="mb-3 rounded-md border border-l-4 border-l-critical bg-critical/10 p-3 text-sm font-semibold text-critical">{err}</p>
       )}

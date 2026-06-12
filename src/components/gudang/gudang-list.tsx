@@ -44,7 +44,7 @@ export function GudangList({ orders }: { orders: OrderView[] }) {
             </ul>
             <div className="mt-3 flex flex-wrap gap-2">
               <button className={btn.primary} disabled={pending} onClick={() => siap(o.id)}>
-                <PackageCheck className="size-4" /> Konfirmasi Siap
+                <PackageCheck className="size-4" /> Siap Dikirim
               </button>
               <a href={`/pdf/picklist/${o.id}`} target="_blank" rel="noopener noreferrer" className={btn.ghost}>
                 <ClipboardList className="size-4" /> Pick List PDF

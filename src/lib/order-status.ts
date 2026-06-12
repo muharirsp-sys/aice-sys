@@ -9,11 +9,11 @@ export type OrderStatus =
   | "paid";
 
 export const STATUS_META: Record<OrderStatus, { label: string; cls: string }> = {
-  pending_approval: { label: "Pending", cls: "bg-muted text-muted-foreground" },
-  approved: { label: "Approved", cls: "bg-primary/12 text-primary" },
+  pending_approval: { label: "Menunggu Disetujui", cls: "bg-muted text-muted-foreground" },
+  approved: { label: "Disetujui", cls: "bg-primary/12 text-primary" },
   rejected: { label: "Ditolak", cls: "bg-critical/12 text-critical" },
-  ready_to_ship: { label: "Siap Kirim", cls: "bg-accent/15 text-accent-foreground" },
-  delivered: { label: "Terkirim", cls: "bg-ok/15 text-ok" },
+  ready_to_ship: { label: "Siap Dikirim", cls: "bg-accent/15 text-accent-foreground" },
+  delivered: { label: "Sudah Diterima Toko", cls: "bg-ok/15 text-ok" },
   paid: { label: "Lunas", cls: "bg-ok/20 text-ok" },
 };
 

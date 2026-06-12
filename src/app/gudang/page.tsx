@@ -8,10 +8,10 @@ import { KendalaLaporPanel } from "@/components/gudang/kendala-lapor-panel";
 import { GudangMuatanPanel, type GudangTripView } from "@/components/kanvas/gudang-muatan-panel";
 import { btn } from "@/lib/ui";
 import {
-  listOrdersByStatus,
+  listApprovedNotInPendingTT,
   listUnPickListedApproved,
   listPendingTandaTerimaForGudang,
-  getTandaTerimaItems,
+  getTandaTerimaItemsWithOrderDetails,
   listOrdersForKendala,
 } from "@/server/queries";
 import { getTripDetail, listTripsForGudang } from "@/server/kanvas-queries";
@@ -19,7 +19,7 @@ import { getTripDetail, listTripsForGudang } from "@/server/kanvas-queries";
 export default async function GudangPage() {
   const user = await requireRole("gudang");
   const [approved, tripRows, unpicklisted, rawPendingTTs, ordersForKendala] = await Promise.all([
-    listOrdersByStatus(["approved"], user.cabangId),
+    listApprovedNotInPendingTT(user.cabangId),
     listTripsForGudang(user.cabangId),
     listUnPickListedApproved(user.cabangId),
     listPendingTandaTerimaForGudang(user.cabangId),
@@ -31,7 +31,7 @@ export default async function GudangPage() {
       id: tt.id,
       tanggal: tt.tanggal.toISOString(),
       adminNama: tt.adminNama,
-      items: await getTandaTerimaItems(tt.id),
+      items: await getTandaTerimaItemsWithOrderDetails(tt.id),
     })),
   );
 
@@ -59,7 +59,7 @@ export default async function GudangPage() {
     <DashboardShell userName={user.name} roleId={user.roleId} cabangId={user.cabangId}>
       <PageHeader
         title="Persiapan Gudang"
-        desc={`${approved.length} nota disetujui · ${unpicklisted.length} belum pick list`}
+        desc={`${approved.length} faktur belum TT · ${unpicklisted.length} belum pick list`}
       >
         <a
           href="/pdf/picklist-agg"
@@ -72,22 +72,34 @@ export default async function GudangPage() {
       </PageHeader>
 
       {pendingTTs.length > 0 && (
-        <section className="mb-6">
-          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Konfirmasi Tanda Terima ({pendingTTs.length})
-          </h2>
+        <section className="mb-8">
+          <div className="mb-3">
+            <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Langkah 1 · Konfirmasi Tanda Terima ({pendingTTs.length})
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Admin sudah mengirim faktur ke gudang. Cek fisik barang — tandai Sesuai atau isi qty aktual jika berbeda.
+            </p>
+          </div>
           <TandaTerimaGudangPanel pendingTTs={pendingTTs} />
         </section>
       )}
 
-      <GudangList orders={approved} />
+      <section className="mb-8">
+        <div className="mb-3">
+          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            {pendingTTs.length > 0 ? "Langkah 2 · Siapkan Pesanan" : "Siapkan Pesanan"}
+          </h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Faktur yang sudah disetujui admin dan belum masuk tanda terima. Siapkan barang lalu klik &ldquo;Siap Dikirim&rdquo;.
+          </p>
+        </div>
+        <GudangList orders={approved} />
+      </section>
 
       {ordersForKendala.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Lapor Kendala Barang
-          </h2>
-          <KendalaLaporPanel orders={ordersForKendala} />
+        <section className="mb-8">
+          <KendalaLaporPanel orders={ordersForKendala} collapsible />
         </section>
       )}
 

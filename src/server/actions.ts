@@ -257,7 +257,43 @@ export async function reportShortage(
   return { ok: true };
 }
 
-// ── Delivery: kirim + bukti foto & GPS ───────────────────────────────────────
+// ── Delivery: muat dari gudang (langkah 1) ───────────────────────────────────
+export async function muatOrder(orderId: number): Promise<ActionResult> {
+  const a = await actorWithRole("delivery");
+  if ("error" in a) return { ok: false, error: a.error };
+  const r = await loadOrder(orderId, a.user.cabangId);
+  if ("error" in r) return { ok: false, error: r.error };
+  if (r.order.status !== "ready_to_ship")
+    return { ok: false, error: "Order belum siap dikirim." };
+
+  const existing = await db
+    .select({ id: pengiriman.id })
+    .from(pengiriman)
+    .where(eq(pengiriman.orderId, orderId))
+    .limit(1);
+  if (existing.length > 0)
+    return { ok: false, error: "Order sudah dimuat." };
+
+  await db.insert(pengiriman).values({
+    orderId,
+    deliveryUserId: a.user.id,
+    dikirim: new Date(),
+    diterima: null,
+    buktiTerimaUrl: null,
+    gpsCoord: null,
+  });
+  await writeAudit({
+    userId: a.user.id,
+    action: "muat_order",
+    table: "pengiriman",
+    newValue: { orderId },
+  });
+
+  revalidatePath("/delivery");
+  return { ok: true };
+}
+
+// ── Delivery: antar ke toko + bukti foto & GPS (langkah 2) ───────────────────
 export async function markDelivered(formData: FormData): Promise<ActionResult> {
   const a = await actorWithRole("delivery");
   if ("error" in a) return { ok: false, error: a.error };
@@ -271,7 +307,7 @@ export async function markDelivered(formData: FormData): Promise<ActionResult> {
   const r = await loadOrder(orderId, a.user.cabangId);
   if ("error" in r) return { ok: false, error: r.error };
   if (r.order.status !== "ready_to_ship")
-    return { ok: false, error: "Order belum siap kirim." };
+    return { ok: false, error: "Order belum siap dikirim." };
 
   let url: string;
   try {
@@ -280,14 +316,27 @@ export async function markDelivered(formData: FormData): Promise<ActionResult> {
     return { ok: false, error: e instanceof Error ? e.message : "Gagal unggah." };
   }
 
-  await db.insert(pengiriman).values({
-    orderId,
-    deliveryUserId: a.user.id,
-    dikirim: new Date(),
-    diterima: new Date(),
-    buktiTerimaUrl: url,
-    gpsCoord: gps,
-  });
+  const [existing] = await db
+    .select({ id: pengiriman.id })
+    .from(pengiriman)
+    .where(eq(pengiriman.orderId, orderId))
+    .limit(1);
+
+  if (existing) {
+    await db.update(pengiriman)
+      .set({ diterima: new Date(), buktiTerimaUrl: url, gpsCoord: gps })
+      .where(eq(pengiriman.id, existing.id));
+  } else {
+    await db.insert(pengiriman).values({
+      orderId,
+      deliveryUserId: a.user.id,
+      dikirim: new Date(),
+      diterima: new Date(),
+      buktiTerimaUrl: url,
+      gpsCoord: gps,
+    });
+  }
+
   await db.update(order).set({ status: "delivered" }).where(eq(order.id, orderId));
   await writeAudit({
     userId: a.user.id,

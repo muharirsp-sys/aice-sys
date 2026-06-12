@@ -29,8 +29,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const ops: Promise<unknown>[] = [
     writeAudit({ userId: Number(user.id), action: "print", table: "faktur", newValue: { orderId: o.id } }),
   ];
-  // Tandai tercetak hanya setelah approved — mencegah isPrinted prematur saat preview pending.
-  if (o.status === "approved") {
+  // Tandai tercetak untuk approved dan ready_to_ship — supaya hilang dari panel Cetak Massal.
+  if (o.status === "approved" || o.status === "ready_to_ship") {
     ops.push(db.update(order).set({ isPrinted: true }).where(eq(order.id, o.id)));
   }
   await Promise.all(ops);

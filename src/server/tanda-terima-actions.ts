@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { tandaTerima, tandaTerimaItem, order, issue } from "@/db/schema";
+import { tandaTerima, tandaTerimaItem, order, orderItem, issue, kendalaItem } from "@/db/schema";
 import { getCurrentUser } from "@/lib/session";
 import { canAccessRole, roleNameFromId } from "@/lib/roles";
 import { saveUpload } from "./upload";
@@ -72,7 +72,7 @@ export async function konfirmasiTandaTerima(formData: FormData): Promise<ActionR
   const itemsJson = String(formData.get("items") ?? "[]");
   const file = formData.get("bukti");
 
-  let items: { orderId: number; status: "sesuai" | "tidak_sesuai"; catatan?: string }[];
+  let items: { orderId: number; status: "sesuai" | "tidak_sesuai"; catatan?: string; qtyItems?: { orderItemId: number; qtyAktual: number }[] }[];
   try {
     items = JSON.parse(itemsJson);
   } catch {
@@ -89,6 +89,15 @@ export async function konfirmasiTandaTerima(formData: FormData): Promise<ActionR
   if (tt.cabangId !== a.user.cabangId) return { ok: false, error: "Tanda terima di luar cabang Anda." };
   if (tt.status === "dikonfirmasi") return { ok: false, error: "Tanda terima sudah dikonfirmasi." };
 
+  // Validasi: pastikan semua orderId yang dikirim benar-benar milik TT ini.
+  const validItems = await db
+    .select({ orderId: tandaTerimaItem.orderId })
+    .from(tandaTerimaItem)
+    .where(eq(tandaTerimaItem.tandaTerimaId, ttId));
+  const validOrderIds = new Set(validItems.map((v) => v.orderId));
+  if (items.some((i) => !validOrderIds.has(i.orderId)))
+    return { ok: false, error: "Data konfirmasi mengandung nota yang tidak valid." };
+
   let buktiUrl: string | null = null;
   if (file instanceof File && file.size > 0) {
     try {
@@ -98,40 +107,70 @@ export async function konfirmasiTandaTerima(formData: FormData): Promise<ActionR
     }
   }
 
-  for (const item of items) {
-    await db
-      .update(tandaTerimaItem)
-      .set({ status: item.status, catatan: item.catatan ?? null })
-      .where(
-        and(eq(tandaTerimaItem.tandaTerimaId, ttId), eq(tandaTerimaItem.orderId, item.orderId)),
-      );
-  }
-
-  await db
-    .update(tandaTerima)
-    .set({ status: "dikonfirmasi", buktiUrl, gudangUserId: a.user.id, dikonfirmasiAt: new Date() })
-    .where(eq(tandaTerima.id, ttId));
-
-  // Nota sesuai → langsung ready_to_ship
   const sesuaiIds = items.filter((i) => i.status === "sesuai").map((i) => i.orderId);
-  if (sesuaiIds.length > 0) {
-    await db.update(order).set({ status: "ready_to_ship" }).where(inArray(order.id, sesuaiIds));
-  }
-
-  // Nota tidak sesuai → buat issue supaya admin & owner tahu
   const tidakSesuaiItems = items.filter((i) => i.status === "tidak_sesuai");
   const now = new Date();
-  for (const item of tidakSesuaiItems) {
-    const catatan = item.catatan ? ` — ${item.catatan}` : "";
-    await db.insert(issue).values({
-      orderId: item.orderId,
-      pelaporUserId: a.user.id,
-      rolePelapor: "gudang",
-      deskripsi: `Tidak sesuai pada TT-${String(ttId).padStart(5, "0")}${catatan}`,
-      waktuLapor: now,
-      status: false,
-    });
-  }
+
+  await db.transaction(async (tx) => {
+    for (const item of items) {
+      await tx
+        .update(tandaTerimaItem)
+        .set({ status: item.status, catatan: item.catatan ?? null })
+        .where(
+          and(eq(tandaTerimaItem.tandaTerimaId, ttId), eq(tandaTerimaItem.orderId, item.orderId)),
+        );
+    }
+
+    await tx
+      .update(tandaTerima)
+      .set({ status: "dikonfirmasi", buktiUrl, gudangUserId: a.user.id, dikonfirmasiAt: now })
+      .where(eq(tandaTerima.id, ttId));
+
+    if (sesuaiIds.length > 0) {
+      await tx.update(order).set({ status: "ready_to_ship" }).where(inArray(order.id, sesuaiIds));
+    }
+
+    // Buat kendalaItem dari qty aktual yang diinput gudang untuk item tidak_sesuai.
+    for (const item of tidakSesuaiItems) {
+      if (!item.qtyItems?.length) continue;
+      const orderItemIds = item.qtyItems.map((q) => q.orderItemId);
+      const ois = await tx
+        .select({ id: orderItem.id, qty: orderItem.qty })
+        .from(orderItem)
+        .where(and(eq(orderItem.orderId, item.orderId), inArray(orderItem.id, orderItemIds)));
+      const qtyMap = new Map(ois.map((o) => [o.id, o.qty]));
+      const toInsert = item.qtyItems.filter(
+        (q) => (qtyMap.get(q.orderItemId) ?? 0) > q.qtyAktual,
+      );
+      if (toInsert.length > 0) {
+        await tx.insert(kendalaItem).values(
+          toInsert.map((q) => ({
+            orderId: item.orderId,
+            orderItemId: q.orderItemId,
+            cabangId: tt.cabangId,
+            qtyOrder: qtyMap.get(q.orderItemId)!,
+            qtyLapor: q.qtyAktual,
+            catatanGudang: item.catatan ?? null,
+            gudangUserId: a.user.id,
+            status: "dilaporkan" as const,
+            createdAt: now,
+          })),
+        );
+      }
+    }
+
+    for (const item of tidakSesuaiItems) {
+      const catatan = item.catatan ? ` — ${item.catatan}` : "";
+      await tx.insert(issue).values({
+        orderId: item.orderId,
+        pelaporUserId: a.user.id,
+        rolePelapor: "gudang",
+        deskripsi: `Tidak sesuai pada TT-${String(ttId).padStart(5, "0")}${catatan}`,
+        waktuLapor: now,
+        status: false,
+      });
+    }
+  });
 
   const tidakSesuai = tidakSesuaiItems.length;
   await writeAudit({

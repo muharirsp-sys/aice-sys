@@ -56,7 +56,7 @@ export function TandaTerimaAdminPanel({
         setSelected(new Set());
         router.refresh();
         window.open(`/pdf/tanda-terima/${res.id}`, "_blank");
-        setMsg({ ok: true, text: `Tanda Terima TT-${String(res.id).padStart(5, "0")} berhasil dibuat.` });
+        setMsg({ ok: true, text: `TT-${String(res.id).padStart(5, "0")} dibuat. Serahkan ke gudang untuk konfirmasi barang.` });
       } else {
         setMsg({ ok: false, text: (res as { ok: false; error: string }).error });
       }
@@ -68,7 +68,7 @@ export function TandaTerimaAdminPanel({
       <section className="rounded-lg border bg-card p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Nota Siap Tanda Terima ({availableOrders.length})
+            Faktur Siap Tanda Terima ({availableOrders.length})
           </h2>
           {availableOrders.length > 0 && (
             <button className={btn.ghost} onClick={toggleAll}>
@@ -79,7 +79,7 @@ export function TandaTerimaAdminPanel({
 
         {availableOrders.length === 0 ? (
           <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-            Semua nota approved sudah masuk tanda terima.
+            Semua faktur approved sudah masuk tanda terima.
           </p>
         ) : (
           <div className="space-y-1">
@@ -111,7 +111,7 @@ export function TandaTerimaAdminPanel({
               className={btn.primary}
             >
               <Plus className="size-4" />
-              {pending ? "Membuat…" : `Buat Tanda Terima (${selected.size} nota)`}
+              {pending ? "Membuat…" : `Buat Tanda Terima (${selected.size} faktur)`}
             </button>
             {msg && (
               <p className={`text-sm font-semibold ${msg.ok ? "text-ok" : "text-critical"}`}>
@@ -138,7 +138,7 @@ export function TandaTerimaAdminPanel({
                     TT-{String(tt.id).padStart(5, "0")}
                   </span>
                   <span className="text-xs text-muted-foreground">{tglPendek(tt.tanggal)}</span>
-                  <span className="text-xs text-muted-foreground">{tt.jumlahNota} nota</span>
+                  <span className="text-xs text-muted-foreground">{tt.jumlahNota} faktur</span>
                   <span
                     className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
                       tt.status === "dikonfirmasi"
