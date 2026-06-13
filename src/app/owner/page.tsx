@@ -5,8 +5,9 @@ import { PageHeader } from "@/components/ui/page-header";
 import { KpiCard } from "@/components/ui/kpi-card";
 import { TrafficLightList } from "@/components/ui/traffic-light-list";
 import { KendalaApprovalPanel } from "@/components/owner/kendala-approval-panel";
+import { RevenueBarChart } from "@/components/ui/revenue-bar-chart";
 import { rupiah } from "@/lib/format";
-import { ownerDashboard, listCabangAll, listKendalaForOwner } from "@/server/queries";
+import { ownerDashboard, listCabangAll, listKendalaForOwner, revenueChart } from "@/server/queries";
 import { deltaPersenOf } from "@/lib/pricing-calc";
 import type { AlertLevel } from "@/lib/order-status";
 
@@ -19,10 +20,11 @@ const DOT: Record<AlertLevel, string> = {
 export default async function OwnerDashboard() {
   const user = await requireRole("owner");
   const effectiveCabangId = await getEffectiveCabangId(user);
-  const [d, cabangs, kendalaItems] = await Promise.all([
+  const [d, cabangs, kendalaItems, chartData] = await Promise.all([
     ownerDashboard(effectiveCabangId),
     listCabangAll(),
     listKendalaForOwner(effectiveCabangId),
+    revenueChart(effectiveCabangId),
   ]);
   const delta = deltaPersenOf(d.pendapatanHariIni, d.pendapatanKemarin);
   const cabangLabel = effectiveCabangId
@@ -54,11 +56,31 @@ export default async function OwnerDashboard() {
         />
       </section>
 
+      <section className="mt-8 rounded-lg border bg-card p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Pendapatan 7 Hari Terakhir
+          </h2>
+          <span className="text-xs text-muted-foreground">
+            Total: {rupiah(chartData.reduce((s, d) => s + d.amount, 0))}
+          </span>
+        </div>
+        <RevenueBarChart data={chartData} />
+      </section>
+
       <div className="mt-8 grid gap-8 lg:grid-cols-5">
         <section className="lg:col-span-3">
-          <h2 className="mb-3 font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Traffic Light Alert
-          </h2>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-display text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Critical Alerts
+            </h2>
+            {d.alerts.length > 0 && (
+              <span className="rounded-full bg-critical/10 px-2 py-0.5 text-[11px] font-semibold text-critical">
+                {d.alerts.filter((a) => a.level === "critical").length} kritis ·{" "}
+                {d.alerts.filter((a) => a.level === "warning").length} warning
+              </span>
+            )}
+          </div>
           <TrafficLightList alerts={d.alerts} />
         </section>
 

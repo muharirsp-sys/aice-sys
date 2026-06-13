@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   order,
@@ -347,6 +347,95 @@ function startOfToday(): Date {
   return d;
 }
 
+async function agingAlerts(filterCabangId?: number | null): Promise<Alert[]> {
+  const cutoff = new Date(Date.now() - 7 * 86400000);
+  const conds: Parameters<typeof and>[0][] = [eq(order.status, "delivered"), lt(order.tanggal, cutoff)];
+  if (filterCabangId != null) conds.push(eq(order.cabangId, filterCabangId));
+  const rows = await db
+    .select({ orderId: order.id, tokoNama: toko.nama, tanggal: order.tanggal })
+    .from(order)
+    .innerJoin(toko, eq(order.tokoId, toko.id))
+    .where(and(...conds));
+  return rows.map((r, i) => ({
+    id: 10000 + i,
+    level: "warning" as AlertLevel,
+    title: `Piutang jatuh tempo — ${r.tokoNama}`,
+    desc: `Order #${r.orderId} sudah dikirim tapi belum lunas (${Math.floor((Date.now() - r.tanggal.getTime()) / 86400000)} hari).`,
+    time: "–",
+  }));
+}
+
+async function stokKritisAlerts(filterCabangId?: number | null): Promise<Alert[]> {
+  const conds: Parameters<typeof and>[0][] = [lte(stokCabang.qty, 5)];
+  if (filterCabangId != null) conds.push(eq(stokCabang.cabangId, filterCabangId));
+  const rows = await db
+    .select({ produkNama: produk.nama, cabangNama: cabang.nama, qty: stokCabang.qty })
+    .from(stokCabang)
+    .innerJoin(produk, eq(stokCabang.produkId, produk.id))
+    .innerJoin(cabang, eq(stokCabang.cabangId, cabang.id))
+    .where(and(...conds));
+  return rows.map((r, i) => ({
+    id: 20000 + i,
+    level: (r.qty <= 0 ? "critical" : "warning") as AlertLevel,
+    title: `Stok ${r.qty <= 0 ? "habis" : "kritis"} — ${r.produkNama}`,
+    desc: `${r.cabangNama}: sisa ${r.qty} pcs.`,
+    time: "–",
+  }));
+}
+
+async function kendalaAnomalyAlerts(filterCabangId?: number | null): Promise<Alert[]> {
+  const cutoff30 = new Date(Date.now() - 30 * 86400000);
+  const conds: Parameters<typeof and>[0][] = [gte(kendalaItem.createdAt, cutoff30)];
+  if (filterCabangId != null) conds.push(eq(kendalaItem.cabangId, filterCabangId));
+  const rows = await db
+    .select({
+      tokoNama: toko.nama,
+      cnt: sql<number>`count(${kendalaItem.id})`,
+      totalSelisih: sql<number>`coalesce(sum(${kendalaItem.qtyOrder} - ${kendalaItem.qtyLapor}), 0)`,
+    })
+    .from(kendalaItem)
+    .innerJoin(order, eq(kendalaItem.orderId, order.id))
+    .innerJoin(toko, eq(order.tokoId, toko.id))
+    .where(and(...conds))
+    .groupBy(toko.id)
+    .having(sql`count(${kendalaItem.id}) >= 2`);
+  return rows.map((r, i) => ({
+    id: 30000 + i,
+    level: "warning" as AlertLevel,
+    title: `Selisih berulang — ${r.tokoNama}`,
+    desc: `${r.cnt}x selisih barang dalam 30 hari terakhir, total ${r.totalSelisih} pcs kurang.`,
+    time: "30 hari terakhir",
+  }));
+}
+
+export async function revenueChart(filterCabangId?: number | null) {
+  const today = startOfToday();
+  const result: { label: string; amount: number }[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const from = new Date(today.getTime() - i * 86400000);
+    const to = new Date(today.getTime() - (i - 1) * 86400000);
+    const conds = [gte(pembayaran.tanggalBayar, from), lt(pembayaran.tanggalBayar, to)];
+    let amount = 0;
+    if (filterCabangId != null) {
+      const [r] = await db
+        .select({ s: sql<number>`coalesce(sum(${pembayaran.jumlah}), 0)` })
+        .from(pembayaran)
+        .innerJoin(order, eq(pembayaran.orderId, order.id))
+        .where(and(...conds, eq(order.cabangId, filterCabangId)));
+      amount = Number(r?.s ?? 0);
+    } else {
+      const [r] = await db
+        .select({ s: sql<number>`coalesce(sum(${pembayaran.jumlah}), 0)` })
+        .from(pembayaran)
+        .where(and(...conds));
+      amount = Number(r?.s ?? 0);
+    }
+    const label = from.toLocaleDateString("id-ID", { day: "numeric", month: "short" });
+    result.push({ label, amount });
+  }
+  return result;
+}
+
 export async function ownerDashboard(filterCabangId?: number | null) {
   const today = startOfToday();
   const yesterday = new Date(today.getTime() - 86400000);
@@ -394,13 +483,24 @@ export async function ownerDashboard(filterCabangId?: number | null) {
   const now = Date.now();
 
   // Traffic Light: barang kurang (gudang) -> critical, selisih (incaso) -> warning.
-  const alerts: Alert[] = issues.map((i) => ({
+  const issueAlerts: Alert[] = issues.map((i) => ({
     id: i.id,
     level: i.role === "gudang" ? "critical" : "warning",
     title: `${i.role === "gudang" ? "Barang kurang" : "Selisih pembayaran"} — Order #${i.orderId} (${i.cabangNama})`,
     desc: i.deskripsi,
     time: relativeTime(i.waktu.toISOString(), now),
   }));
+  const [extraAging, extraStok, extraKendala] = await Promise.all([
+    agingAlerts(filterCabangId),
+    stokKritisAlerts(filterCabangId),
+    kendalaAnomalyAlerts(filterCabangId),
+  ]);
+  const alerts: Alert[] = [
+    ...issueAlerts,
+    ...extraAging,
+    ...extraStok,
+    ...extraKendala,
+  ];
 
   // Ringkasan per cabang (filter ke satu cabang jika dipilih).
   const allCabangs = await db.select({ id: cabang.id, nama: cabang.nama }).from(cabang);
