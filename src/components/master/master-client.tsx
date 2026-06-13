@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition, useMemo } from "react";
+import { useState, useTransition, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Search, X, Trash2 } from "lucide-react";
+import { Plus, Pencil, Search, X, Trash2, Upload } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -16,6 +16,11 @@ import {
   upsertDiskon,
 } from "@/server/master-actions";
 import { createUser, updateUser, deleteUser } from "@/server/user-actions";
+import {
+  uploadProductsAction,
+  type UploadProductsRawRow,
+  type UploadProductsResult,
+} from "@/server/upload-products-action";
 
 const PAGE_SIZE = 20;
 
@@ -174,6 +179,258 @@ function Field({
   );
 }
 
+// ── Bulk Upload Helper ───────────────────────────────────────────────────────
+
+/**
+ * Trigger unduhan file Excel dari Base64 string di sisi klien.
+ * Membuat anchor element sementara, men-set href ke data URI, lalu klik programatik.
+ */
+function downloadBase64Excel(base64: string, filename: string) {
+  const byteChars = atob(base64);
+  const byteNums = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) {
+    byteNums[i] = byteChars.charCodeAt(i);
+  }
+  const byteArray = new Uint8Array(byteNums);
+  const blob = new Blob([byteArray], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Parse file Excel (.xlsx) di browser menggunakan ExcelJS (sudah ada di bundle).
+ * Mengembalikan array of plain objects, key = nilai header baris pertama.
+ */
+async function parseExcelFile(file: File): Promise<UploadProductsRawRow[]> {
+  const ExcelJS = await import("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  const buffer = await file.arrayBuffer();
+  await workbook.xlsx.load(buffer);
+
+  const sheet = workbook.worksheets[0];
+  if (!sheet) throw new Error("File Excel tidak memiliki sheet.");
+
+  const rows: UploadProductsRawRow[] = [];
+  let headers: string[] = [];
+
+  sheet.eachRow((row, rowNum) => {
+    const values = (row.values as (string | number | null | undefined)[]).slice(1); // index 0 kosong di ExcelJS
+    if (rowNum === 1) {
+      headers = values.map((v) => String(v ?? "").trim());
+    } else {
+      // Skip baris kosong total
+      if (values.every((v) => v == null || String(v).trim() === "")) return;
+      const obj: UploadProductsRawRow = {};
+      headers.forEach((h, i) => {
+        (obj as Record<string, unknown>)[h] = values[i] ?? null;
+      });
+      rows.push(obj);
+    }
+  });
+
+  return rows;
+}
+
+type BulkUploadState =
+  | { phase: "idle" }
+  | { phase: "parsing" }
+  | { phase: "uploading" }
+  | { phase: "done"; result: UploadProductsResult };
+
+function BulkUploadProduk() {
+  const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [state, setState] = useState<BulkUploadState>({ phase: "idle" });
+  const [open, setOpen] = useState(false);
+
+  function openDialog() {
+    setState({ phase: "idle" });
+    setOpen(true);
+  }
+
+  function closeDialog() {
+    setOpen(false);
+    setState({ phase: "idle" });
+    // Reset file input agar file yang sama bisa dipilih lagi
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setState({ phase: "parsing" });
+      const rawData = await parseExcelFile(file);
+
+      setState({ phase: "uploading" });
+      const result = await uploadProductsAction(rawData);
+
+      setState({ phase: "done", result });
+
+      if (result.status === "all_success") {
+        router.refresh();
+      } else if (
+        (result.status === "partial_success" || result.status === "all_failed") &&
+        result.failedCount > 0 &&
+        result.errorFileBase64
+      ) {
+        // Auto-trigger download file error jika ada baris gagal
+        downloadBase64Excel(
+          result.errorFileBase64,
+          `error-produk-${new Date().toISOString().slice(0, 10)}.xlsx`
+        );
+        if (result.status === "partial_success") router.refresh();
+      }
+    } catch (err) {
+      setState({
+        phase: "done",
+        result: {
+          status: "error",
+          message: err instanceof Error ? err.message : "Terjadi kesalahan tidak terduga.",
+        },
+      });
+    } finally {
+      // Reset file input
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  const isLoading = state.phase === "parsing" || state.phase === "uploading";
+
+  return (
+    <>
+      {/* Trigger button — muncul di toolbar MasterProdukPanel */}
+      <button
+        className={btn.outline}
+        onClick={openDialog}
+        aria-label="Bulk upload produk dari Excel"
+        title="Upload Excel"
+      >
+        <Upload className="size-4" />
+        <span className="hidden sm:inline">Upload Excel</span>
+      </button>
+
+      <Dialog open={open} onClose={closeDialog} title="Bulk Upload Produk">
+        {/* Petunjuk format */}
+        <div className="mb-4 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+          <p className="mb-1 font-semibold text-foreground">Format kolom Excel (baris pertama = header):</p>
+          <ul className="list-disc pl-4 space-y-0.5">
+            <li><strong>Nama</strong> — nama produk (wajib)</li>
+            <li><strong>SKU</strong> — kode unik, huruf/angka/tanda hubung/titik (wajib)</li>
+            <li><strong>Satuan</strong> — satuan default, misal: <em>pcs</em>, <em>dus</em> (wajib)</li>
+            <li><strong>SatuanTambahan</strong> — satuan ekstra dipisah <em>|</em>, misal: <em>lusin|gross</em> (opsional)</li>
+          </ul>
+          <p className="mt-2">Baris yang gagal akan dikembalikan sebagai file Excel baru dengan kolom <strong>Alasan_Error</strong>.</p>
+        </div>
+
+        {/* File input */}
+        {state.phase !== "done" && (
+          <div className="mb-3">
+            <label className={label}>Pilih file .xlsx</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              disabled={isLoading}
+              onChange={handleFile}
+              className="block w-full cursor-pointer rounded-md border border-border bg-background px-3 py-2 text-sm file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-medium file:text-primary-foreground hover:file:opacity-90 disabled:opacity-50"
+              aria-label="Pilih file Excel untuk bulk upload produk"
+            />
+          </div>
+        )}
+
+        {/* Status loading */}
+        {isLoading && (
+          <p className="text-sm text-muted-foreground animate-pulse">
+            {state.phase === "parsing" ? "Membaca file Excel..." : "Mengupload data ke server..."}
+          </p>
+        )}
+
+        {/* Hasil upload */}
+        {state.phase === "done" && (
+          <div className="space-y-3">
+            {state.result.status === "error" && (
+              <div className="rounded-md border border-critical/30 bg-critical/10 p-3">
+                <p className="text-sm font-semibold text-critical">Upload gagal</p>
+                <p className="text-sm text-critical">{state.result.message}</p>
+              </div>
+            )}
+
+            {state.result.status === "all_success" && (
+              <div className="rounded-md border border-green-200 bg-green-50 p-3">
+                <p className="text-sm font-semibold text-green-800">Semua data berhasil disimpan</p>
+                <p className="text-sm text-green-700">
+                  {state.result.insertedCount} dari {state.result.total} produk berhasil diinsert.
+                </p>
+              </div>
+            )}
+
+            {(state.result.status === "partial_success" || state.result.status === "all_failed") && (
+              <div
+                className={`rounded-md border p-3 ${
+                  state.result.status === "all_failed"
+                    ? "border-critical/30 bg-critical/10"
+                    : "border-yellow-200 bg-yellow-50"
+                }`}
+              >
+                <p
+                  className={`text-sm font-semibold ${
+                    state.result.status === "all_failed" ? "text-critical" : "text-yellow-800"
+                  }`}
+                >
+                  {state.result.status === "all_failed" ? "Semua baris gagal" : "Upload sebagian berhasil"}
+                </p>
+                <ul className="mt-1 text-sm space-y-0.5">
+                  <li>
+                    Berhasil diinsert:{" "}
+                    <strong className="tabular">{state.result.insertedCount}</strong> baris
+                  </li>
+                  <li>
+                    Gagal / ditolak:{" "}
+                    <strong className="tabular text-critical">{state.result.failedCount}</strong> baris
+                  </li>
+                  <li>Total dikirim: <strong className="tabular">{state.result.total}</strong> baris</li>
+                </ul>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  File Excel berisi baris-baris yang gagal beserta kolom{" "}
+                  <strong>Alasan_Error</strong> sudah otomatis diunduh.
+                </p>
+                {/* Tombol unduh ulang jika user menutup dialog sebelum download selesai */}
+                {state.result.errorFileBase64 && (
+                  <button
+                    className={`${btn.outline} mt-2 text-xs`}
+                    onClick={() =>
+                      downloadBase64Excel(
+                        (state.result as { errorFileBase64: string }).errorFileBase64,
+                        `error-produk-${new Date().toISOString().slice(0, 10)}.xlsx`
+                      )
+                    }
+                  >
+                    Unduh ulang file error
+                  </button>
+                )}
+              </div>
+            )}
+
+            <button className={btn.outline} onClick={closeDialog}>
+              Tutup
+            </button>
+          </div>
+        )}
+      </Dialog>
+    </>
+  );
+}
+
 // ── Produk ────────────────────────────────────────────────────────────────────
 type Produk = { id: number; nama: string; sku: string; satuan: string };
 type StokEntry = { produkId: number; cabangId: number; qty: number; cabangNama: string };
@@ -322,6 +579,9 @@ function MasterProdukPanel({
         search={search}
         onSearch={handleSearch}
         searchPlaceholder="Cari nama / SKU..."
+        filterSlot={
+          <BulkUploadProduk />
+        }
       />
       <DataTable columns={cols} rows={pageRows} getRowKey={(r) => r.id} />
       <Pagination
