@@ -4,6 +4,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { format } from "@/lib/format";
 import type { PosisiStokRow, KartuStokRow, KartuStokTipe } from "@/lib/inventory-types";
+import { BulkUploadButton } from "@/components/ui/bulk-upload-button";
+import { uploadStokAction } from "@/server/upload-stok-action";
 
 // Re-export agar page.tsx tetap bisa import dari sini (single import point untuk UI).
 export type { PosisiStokRow, KartuStokRow };
@@ -166,10 +168,18 @@ export function InventoryTabs({
 }) {
   return (
     <Tabs defaultValue="posisi">
-      <TabsList className="mb-4">
-        <TabsTrigger value="posisi">Posisi Stok ({posisiStok.length})</TabsTrigger>
-        <TabsTrigger value="kartu">Kartu Stok ({kartuStok.length})</TabsTrigger>
-      </TabsList>
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <TabsList>
+          <TabsTrigger value="posisi">Posisi Stok ({posisiStok.length})</TabsTrigger>
+          <TabsTrigger value="kartu">Kartu Stok ({kartuStok.length})</TabsTrigger>
+        </TabsList>
+        <BulkUploadButton
+          module="stok"
+          dialogTitle="Stok"
+          uploadAction={uploadStokAction as (rows: Record<string, unknown>[]) => ReturnType<typeof uploadStokAction>}
+          errorFilename="error-stok.xlsx"
+        />
+      </div>
 
       <TabsContent value="posisi">
         <DataTable

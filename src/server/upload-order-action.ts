@@ -25,8 +25,9 @@ export type UploadOrderResult =
 export async function uploadOrderAction(rawData: UploadOrderRawRow[]): Promise<UploadOrderResult> {
   const u = await getCurrentUser();
   if (!u) return { status: "error", message: "Sesi berakhir." };
-  if (!canAccessRole(roleNameFromId(u.roleId), "admin"))
-    return { status: "error", message: "Hanya Admin, Owner, atau Super Admin yang dapat melakukan bulk upload order." };
+  const roleName = roleNameFromId(u.roleId);
+  if (!canAccessRole(roleName, "admin_fakturist") && !canAccessRole(roleName, "owner"))
+    return { status: "error", message: "Hanya Admin Fakturist, Owner, atau Super Admin yang dapat melakukan bulk upload order." };
   if (!Array.isArray(rawData) || rawData.length === 0) return { status: "error", message: "Data kosong." };
   if (rawData.length > 5_000) return { status: "error", message: "Maksimal 5.000 baris per upload." };
 
@@ -58,7 +59,7 @@ export async function uploadOrderAction(rawData: UploadOrderRawRow[]): Promise<U
 
     const groupStr = raw.OrderGroup !== undefined && raw.OrderGroup !== null && String(raw.OrderGroup).trim() !== ""
       ? String(raw.OrderGroup).trim() : null;
-    const groupNum = groupStr ? Math.floor(Number(groupStr)) : lastGroup;
+    const groupNum: number | null = groupStr ? Math.floor(Number(groupStr)) : lastGroup;
 
     if (groupNum === null || !Number.isFinite(groupNum) || groupNum < 1) {
       invalidRows.push({ rowData: raw, rowIndex, errorMessage: "Kolom OrderGroup wajib diisi dengan angka ≥ 1 pada baris pertama setiap order" });
@@ -143,7 +144,7 @@ export async function uploadOrderAction(rawData: UploadOrderRawRow[]): Promise<U
     try {
       await db.transaction(async (tx) => {
         for (const o of readyOrders) {
-          const [created] = await tx.insert(order).values({ tokoId: o.tokoId, userId: u.id, cabangId: o.cabangId, tanggal: new Date(), status: "pending", tipe: "taking_order" }).returning({ id: order.id });
+          const [created] = await tx.insert(order).values({ tokoId: o.tokoId, userId: Number(u.id), cabangId: o.cabangId, tanggal: new Date(), status: "pending", tipe: "taking_order" }).returning({ id: order.id });
           await tx.insert(orderItem).values(o.items.map((item) => ({ orderId: created.id, ...item })));
           insertedCount++;
         }

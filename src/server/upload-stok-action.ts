@@ -60,21 +60,26 @@ export async function uploadStokAction(rawData: UploadStokRawRow[]): Promise<Upl
     try {
       await db.transaction(async (tx) => {
         for (const row of validRows) {
-          const [existing] = await tx.select({ id: stokCabang.id })
+          const [existing] = await tx.select({ id: stokCabang.id, qty: stokCabang.qty })
             .from(stokCabang)
             .where(and(eq(stokCabang.produkId, row.produkId), eq(stokCabang.cabangId, u.cabangId)))
             .limit(1);
 
+          const JENIS_TO_TIPE = { masuk: "IN", keluar: "OUT", koreksi: "ADJUSTMENT" } as const;
+          let qtySaldo: number;
+
           if (row.jenis === "koreksi") {
-            if (existing) await tx.update(stokCabang).set({ stok: row.qty }).where(eq(stokCabang.id, existing.id));
-            else await tx.insert(stokCabang).values({ produkId: row.produkId, cabangId: u.cabangId, stok: row.qty });
+            qtySaldo = row.qty;
+            if (existing) await tx.update(stokCabang).set({ qty: row.qty }).where(eq(stokCabang.id, existing.id));
+            else await tx.insert(stokCabang).values({ produkId: row.produkId, cabangId: u.cabangId, qty: row.qty });
           } else {
             const delta = row.jenis === "masuk" ? row.qty : -row.qty;
-            if (existing) await tx.update(stokCabang).set({ stok: sql`${stokCabang.stok} + ${delta}` }).where(eq(stokCabang.id, existing.id));
-            else await tx.insert(stokCabang).values({ produkId: row.produkId, cabangId: u.cabangId, stok: Math.max(0, delta) });
+            qtySaldo = (existing?.qty ?? 0) + delta;
+            if (existing) await tx.update(stokCabang).set({ qty: sql`${stokCabang.qty} + ${delta}` }).where(eq(stokCabang.id, existing.id));
+            else await tx.insert(stokCabang).values({ produkId: row.produkId, cabangId: u.cabangId, qty: Math.max(0, delta) });
           }
 
-          await tx.insert(kartuStok).values({ produkId: row.produkId, cabangId: u.cabangId, userId: u.id, jenis: row.jenis, qty: row.qty, catatan: row.catatan, tanggal: new Date() });
+          await tx.insert(kartuStok).values({ produkId: row.produkId, cabangId: u.cabangId, createdBy: Number(u.id), tipe: JENIS_TO_TIPE[row.jenis], qty: row.qty, qtySaldo, keterangan: row.catatan, createdAt: new Date() });
           insertedCount++;
         }
       });

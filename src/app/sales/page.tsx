@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatusPill } from "@/components/ui/status-pill";
 import { OrderEntryForm } from "@/components/sales/order-entry-form";
+import { OrderUploadPanel } from "@/components/sales/order-upload-panel";
 import { masterForOrderEntry, listRecentOrders } from "@/server/queries";
 import { totalItems } from "@/lib/pricing-calc";
 import { rupiah, tglPendek } from "@/lib/format";
@@ -36,6 +37,7 @@ export default async function SalesPage() {
         <Link href="/sales/kanvas" className={btn.outline}>
           <Truck className="size-4" /> Kanvas Luar Kota
         </Link>
+        <OrderUploadPanel />
       </PageHeader>
       <OrderEntryForm tokos={master.tokos} produks={master.produks} diskon={master.diskon} />
 
