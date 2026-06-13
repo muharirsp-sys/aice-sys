@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Check, CheckCheck, X, FileText, ClipboardList } from "lucide-react";
+import { Check, CheckCheck, X, FileText, ClipboardList, Printer } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { rupiah } from "@/lib/format";
 import { totalItems } from "@/lib/pricing-calc";
@@ -99,6 +99,9 @@ export function ApprovalList({ orders }: { orders: OrderView[] }) {
               </button>
               <a href={`/pdf/faktur/${o.id}`} target="_blank" rel="noopener noreferrer" className={btn.ghost}>
                 <FileText className="size-4" /> Faktur PDF
+              </a>
+              <a href={`/cetak/faktur/${o.id}?autoprint=1`} target="_blank" rel="noopener noreferrer" className={btn.ghost}>
+                <Printer className="size-4" /> Dot Matrix
               </a>
               <a href={`/pdf/picklist/${o.id}`} target="_blank" rel="noopener noreferrer" className={btn.ghost}>
                 <ClipboardList className="size-4" /> Pick List PDF

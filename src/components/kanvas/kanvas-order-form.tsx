@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Check } from "lucide-react";
+import { Plus, Trash2, Check, Printer } from "lucide-react";
 import { rupiah } from "@/lib/format";
 import { subtotalItem } from "@/lib/pricing-calc";
 import { btn, input, label } from "@/lib/ui";
@@ -227,6 +227,9 @@ export function KanvasOrderForm({
           <span className="text-sm font-semibold">INV-{terbit.orderId} · {terbit.tokoNama} · {rupiah(terbit.total)}</span>
           <KirimWaButton orderId={terbit.orderId} shareToken={terbit.shareToken} noTelp={terbit.noTelp} tokoNama={terbit.tokoNama} total={terbit.total} />
           <a href={`/pdf/faktur/${terbit.orderId}`} target="_blank" rel="noopener noreferrer" className={btn.ghost}>Lihat PDF</a>
+          <a href={`/cetak/faktur/${terbit.orderId}?autoprint=1`} target="_blank" rel="noopener noreferrer" className={btn.ghost}>
+            <Printer className="size-4" /> Dot Matrix
+          </a>
         </div>
       )}
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText } from "lucide-react";
+import { FileText, Printer } from "lucide-react";
 import { btn } from "@/lib/ui";
 import { rupiah } from "@/lib/format";
 import { totalItems } from "@/lib/pricing-calc";
@@ -30,7 +30,10 @@ export function CetakMassalPanel({ unprinted }: { unprinted: OrderView[] }) {
               <span className="tabular">{rupiah(totalItems(o.items))}</span>
             </span>
             <a href={`/pdf/faktur/${o.id}`} target="_blank" rel="noopener noreferrer" className={btn.outline}>
-              <FileText className="size-4" /> Cetak
+              <FileText className="size-4" /> PDF
+            </a>
+            <a href={`/cetak/faktur/${o.id}?autoprint=1`} target="_blank" rel="noopener noreferrer" className={btn.outline}>
+              <Printer className="size-4" /> Dot Matrix
             </a>
           </div>
         ))}
