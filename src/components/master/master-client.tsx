@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Search, X, Trash2, Upload } from "lucide-react";
+import { Plus, Pencil, Search, X, Trash2, Upload, Download } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -21,6 +21,7 @@ import {
   type UploadProductsRawRow,
   type UploadProductsResult,
 } from "@/server/upload-products-action";
+import { getUploadTemplate } from "@/server/upload-template-action";
 
 const PAGE_SIZE = 20;
 
@@ -239,6 +240,34 @@ async function parseExcelFile(file: File): Promise<UploadProductsRawRow[]> {
   return rows;
 }
 
+// Tombol unduh template Excel kosong untuk modul upload tertentu.
+function DownloadTemplateButton({ module }: { module: Parameters<typeof getUploadTemplate>[0] }) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleDownload() {
+    setLoading(true);
+    try {
+      const { base64, filename } = await getUploadTemplate(module);
+      downloadBase64Excel(base64, filename);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleDownload}
+      disabled={loading}
+      className={btn.outline + " shrink-0 text-xs py-1 px-2 h-auto"}
+      title="Unduh template Excel kosong"
+    >
+      <Download className="size-3 mr-1" />
+      {loading ? "Memuat..." : "Unduh Template"}
+    </button>
+  );
+}
+
 type BulkUploadState =
   | { phase: "idle" }
   | { phase: "parsing" }
@@ -320,13 +349,16 @@ function BulkUploadProduk() {
       </button>
 
       <Dialog open={open} onClose={closeDialog} title="Bulk Upload Produk">
-        {/* Petunjuk format */}
+        {/* Petunjuk format + tombol unduh template */}
         <div className="mb-4 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-          <p className="mb-1 font-semibold text-foreground">Format kolom Excel (baris pertama = header):</p>
+          <div className="mb-2 flex items-start justify-between gap-2">
+            <p className="font-semibold text-foreground">Format kolom Excel (baris pertama = header):</p>
+            <DownloadTemplateButton module="produk" />
+          </div>
           <ul className="list-disc pl-4 space-y-0.5">
-            <li><strong>Nama</strong> — nama produk (wajib)</li>
-            <li><strong>SKU</strong> — kode unik, huruf/angka/tanda hubung/titik (wajib)</li>
-            <li><strong>Satuan</strong> — satuan default, misal: <em>pcs</em>, <em>dus</em> (wajib)</li>
+            <li><strong>Nama *</strong> — nama produk</li>
+            <li><strong>SKU *</strong> — kode unik, huruf/angka/tanda hubung/titik</li>
+            <li><strong>Satuan *</strong> — satuan default, misal: <em>pcs</em>, <em>dus</em></li>
             <li><strong>SatuanTambahan</strong> — satuan ekstra dipisah <em>|</em>, misal: <em>lusin|gross</em> (opsional)</li>
           </ul>
           <p className="mt-2">Baris yang gagal akan dikembalikan sebagai file Excel baru dengan kolom <strong>Alasan_Error</strong>.</p>
