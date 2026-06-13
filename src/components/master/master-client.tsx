@@ -21,7 +21,10 @@ import {
   type UploadProductsRawRow,
   type UploadProductsResult,
 } from "@/server/upload-products-action";
-import { getUploadTemplate } from "@/server/upload-template-action";
+import { getUploadTemplate, type UploadModule } from "@/server/upload-template-action";
+import { uploadTokoAction, type UploadTokoRawRow } from "@/server/upload-toko-action";
+import { uploadHargaAction, type UploadHargaRawRow } from "@/server/upload-harga-action";
+import { uploadDiskonAction, type UploadDiskonRawRow } from "@/server/upload-diskon-action";
 
 const PAGE_SIZE = 20;
 
@@ -265,6 +268,109 @@ function DownloadTemplateButton({ module }: { module: Parameters<typeof getUploa
       <Download className="size-3 mr-1" />
       {loading ? "Memuat..." : "Unduh Template"}
     </button>
+  );
+}
+
+// Generic bulk upload button — dipakai oleh semua modul selain Produk.
+// Caller cukup pass module (untuk template) + uploadAction + label dialog.
+type AnyUploadResult =
+  | { status: "partial_success" | "all_success"; total: number; insertedCount: number; failedCount: number; errorFileBase64: string | null }
+  | { status: "all_failed"; total: number; insertedCount: 0; failedCount: number; errorFileBase64: string }
+  | { status: "error"; message: string };
+
+function BulkUploadButton({
+  module,
+  dialogTitle,
+  uploadAction,
+  errorFilename,
+}: {
+  module: UploadModule;
+  dialogTitle: string;
+  uploadAction: (rows: Record<string, unknown>[]) => Promise<AnyUploadResult>;
+  errorFilename: string;
+}) {
+  const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [state, setState] = useState<{ phase: "idle" } | { phase: "parsing" } | { phase: "uploading" } | { phase: "done"; result: AnyUploadResult }>({ phase: "idle" });
+  const [open, setOpen] = useState(false);
+
+  function openDialog() { setState({ phase: "idle" }); setOpen(true); }
+  function closeDialog() { setOpen(false); setState({ phase: "idle" }); if (fileInputRef.current) fileInputRef.current.value = ""; }
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setState({ phase: "parsing" });
+      const rawData = await parseExcelFile(file) as Record<string, unknown>[];
+      setState({ phase: "uploading" });
+      const result = await uploadAction(rawData);
+      setState({ phase: "done", result });
+      if (result.status === "all_success") { router.refresh(); }
+      else if ((result.status === "partial_success" || result.status === "all_failed") && result.failedCount > 0 && result.errorFileBase64) {
+        downloadBase64Excel(result.errorFileBase64, errorFilename);
+        if (result.status === "partial_success") router.refresh();
+      }
+    } catch (err) {
+      setState({ phase: "done", result: { status: "error", message: err instanceof Error ? err.message : "Terjadi kesalahan tidak terduga." } });
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  const isLoading = state.phase === "parsing" || state.phase === "uploading";
+
+  return (
+    <>
+      <button className={btn.outline} onClick={openDialog} title={`Upload Excel ${dialogTitle}`}>
+        <Upload className="size-4" />
+        <span className="hidden sm:inline">Upload Excel</span>
+      </button>
+
+      <Dialog open={open} onClose={closeDialog} title={`Bulk Upload ${dialogTitle}`}>
+        <div className="mb-4 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+          <div className="mb-2 flex items-start justify-between gap-2">
+            <p className="font-semibold text-foreground">Format kolom — unduh template untuk panduan lengkap:</p>
+            <DownloadTemplateButton module={module} />
+          </div>
+          <p>Baris yang gagal divalidasi akan dikembalikan sebagai file Excel baru dengan kolom <strong>Alasan_Error</strong>.</p>
+        </div>
+
+        {state.phase !== "done" && (
+          <div className="mb-3">
+            <label className={label}>Pilih file .xlsx</label>
+            <input ref={fileInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={isLoading} onChange={handleFile}
+              className="block w-full cursor-pointer rounded-md border border-border bg-background px-3 py-2 text-sm file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-primary file:px-3 file:py-1 file:text-xs file:font-medium file:text-primary-foreground hover:file:opacity-90 disabled:opacity-50" />
+          </div>
+        )}
+
+        {isLoading && <p className="text-sm text-muted-foreground animate-pulse">{state.phase === "parsing" ? "Membaca file Excel..." : "Mengupload data ke server..."}</p>}
+
+        {state.phase === "done" && (
+          <div className="space-y-3">
+            {state.result.status === "error" && (
+              <div className="rounded-md border border-critical/30 bg-critical/10 p-3">
+                <p className="text-sm font-semibold text-critical">Upload gagal</p>
+                <p className="text-sm text-critical">{state.result.message}</p>
+              </div>
+            )}
+            {(state.result.status === "all_success" || state.result.status === "partial_success" || state.result.status === "all_failed") && (
+              <div className={`rounded-md border p-3 ${state.result.status === "all_success" ? "border-success/30 bg-success/10" : "border-warning/30 bg-warning/10"}`}>
+                <p className="text-sm font-semibold">{state.result.status === "all_success" ? "Upload berhasil" : state.result.status === "partial_success" ? "Upload sebagian berhasil" : "Semua baris gagal"}</p>
+                <p className="text-sm">Total: {state.result.total} | Berhasil: {state.result.insertedCount} | Gagal: {state.result.failedCount}</p>
+                {state.result.failedCount > 0 && <p className="text-xs mt-1 text-muted-foreground">File error sudah diunduh otomatis.</p>}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button className={btn.outline} onClick={closeDialog}>Tutup</button>
+              {state.result.status !== "all_success" && (
+                <button className={btn.primary} onClick={() => { setState({ phase: "idle" }); if (fileInputRef.current) fileInputRef.current.value = ""; }}>Upload Lagi</button>
+              )}
+            </div>
+          </div>
+        )}
+      </Dialog>
+    </>
   );
 }
 
@@ -946,19 +1052,25 @@ function MasterTokoPanel({
         onSearch={handleSearch}
         searchPlaceholder="Cari nama toko..."
         filterSlot={
-          <select
-            className={`${input} w-auto min-w-[140px]`}
-            value={filterCabang}
-            onChange={(e) => handleFilterCabang(Number(e.target.value))}
-            aria-label="Filter cabang"
-          >
-            <option value={0}>Semua Cabang</option>
-            {cabangs.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nama}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              className={`${input} w-auto min-w-[140px]`}
+              value={filterCabang}
+              onChange={(e) => handleFilterCabang(Number(e.target.value))}
+              aria-label="Filter cabang"
+            >
+              <option value={0}>Semua Cabang</option>
+              {cabangs.map((c) => (
+                <option key={c.id} value={c.id}>{c.nama}</option>
+              ))}
+            </select>
+            <BulkUploadButton
+              module="toko"
+              dialogTitle="Toko"
+              uploadAction={(rows) => uploadTokoAction(rows as UploadTokoRawRow[])}
+              errorFilename={`error-toko-${new Date().toISOString().slice(0, 10)}.xlsx`}
+            />
+          </div>
         }
       />
       <DataTable columns={cols} rows={pageRows} getRowKey={(r) => r.id} />
@@ -1111,19 +1223,25 @@ function MasterHargaPanel({
         onSearch={handleSearch}
         searchPlaceholder="Cari produk / cabang..."
         filterSlot={
-          <select
-            className={`${input} w-auto min-w-[140px]`}
-            value={filterCabang}
-            onChange={(e) => handleFilterCabang(Number(e.target.value))}
-            aria-label="Filter cabang"
-          >
-            <option value={0}>Semua Cabang</option>
-            {cabangs.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nama}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              className={`${input} w-auto min-w-[140px]`}
+              value={filterCabang}
+              onChange={(e) => handleFilterCabang(Number(e.target.value))}
+              aria-label="Filter cabang"
+            >
+              <option value={0}>Semua Cabang</option>
+              {cabangs.map((c) => (
+                <option key={c.id} value={c.id}>{c.nama}</option>
+              ))}
+            </select>
+            <BulkUploadButton
+              module="harga"
+              dialogTitle="Harga Dasar"
+              uploadAction={(rows) => uploadHargaAction(rows as UploadHargaRawRow[])}
+              errorFilename={`error-harga-${new Date().toISOString().slice(0, 10)}.xlsx`}
+            />
+          </div>
         }
       />
       <DataTable columns={cols} rows={pageRows} getRowKey={(r) => r.id} />
@@ -1306,19 +1424,25 @@ function MasterDiskonPanel({
         onSearch={handleSearch}
         searchPlaceholder="Cari toko / produk..."
         filterSlot={
-          <select
-            className={`${input} w-auto min-w-[140px]`}
-            value={filterToko}
-            onChange={(e) => handleFilterToko(Number(e.target.value))}
-            aria-label="Filter toko"
-          >
-            <option value={0}>Semua Toko</option>
-            {tokos.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.nama}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              className={`${input} w-auto min-w-[140px]`}
+              value={filterToko}
+              onChange={(e) => handleFilterToko(Number(e.target.value))}
+              aria-label="Filter toko"
+            >
+              <option value={0}>Semua Toko</option>
+              {tokos.map((t) => (
+                <option key={t.id} value={t.id}>{t.nama}</option>
+              ))}
+            </select>
+            <BulkUploadButton
+              module="diskon"
+              dialogTitle="Diskon Toko"
+              uploadAction={(rows) => uploadDiskonAction(rows as UploadDiskonRawRow[])}
+              errorFilename={`error-diskon-${new Date().toISOString().slice(0, 10)}.xlsx`}
+            />
+          </div>
         }
       />
       <DataTable
