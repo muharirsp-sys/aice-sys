@@ -13,6 +13,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { stokCabang, kartuStok } from "@/db/schema";
 import { getCurrentUser } from "@/lib/session";
+import { roleNameFromId } from "@/lib/roles";
 
 // SALDO_AWAL hanya boleh di-insert dari master-actions (pembuatan produk baru).
 // mutateStock hanya menerima tiga tipe operasional.
@@ -44,6 +45,20 @@ export async function mutateStock(
   const u = await getCurrentUser();
   if (!u) return { ok: false, error: "Sesi berakhir. Silakan login ulang." };
   const userId = Number(u.id);
+
+  // RBAC: hanya gudang, owner, atau super_admin yang boleh memutasi stok.
+  // Tanpa guard ini server action terekspos ke SEMUA peran (mis. sales).
+  const actorRole = roleNameFromId(u.roleId);
+  if (actorRole !== "gudang" && actorRole !== "owner" && actorRole !== "super_admin") {
+    return { ok: false, error: "Tidak berwenang memutasi stok." };
+  }
+
+  // IDOR / tenant isolation: branchId dari klien WAJIB sama dengan cabang aktor.
+  // Hanya super_admin (akses global) yang boleh menembus batas cabang. Tanpa ini
+  // user mana pun bisa memanipulasi stok cabang lain dengan branchId arbitrer.
+  if (actorRole !== "super_admin" && branchId !== u.cabangId) {
+    return { ok: false, error: "Tidak dapat memutasi stok di luar cabang Anda." };
+  }
 
   if (!Number.isFinite(qtyChange) || qtyChange === 0) {
     return { ok: false, error: "qtyChange tidak valid atau nol." };

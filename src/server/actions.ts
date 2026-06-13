@@ -585,6 +585,10 @@ export async function resetOrderToPending(orderId: number): Promise<ActionResult
     .limit(1);
 
   if (!o) return { ok: false, error: "Order tidak ditemukan." };
+  // IDOR: order wajib milik cabang aktor (konsisten dengan loadOrder). Tanpa ini
+  // Owner cabang A dapat mereset order milik cabang B.
+  if (o.cabangId !== a.user.cabangId)
+    return { ok: false, error: "Order di luar cabang Anda." };
   if (o.status !== "rejected")
     return { ok: false, error: "Hanya order berstatus Ditolak yang bisa direset." };
 

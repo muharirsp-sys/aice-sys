@@ -145,6 +145,10 @@ export async function approveKendala(itemIds: number[]): Promise<ActionResult> {
     .where(inArray(kendalaItem.id, itemIds));
 
   if (rows.length !== itemIds.length) return { ok: false, error: "Sebagian item tidak ditemukan." };
+  // IDOR: item kendala wajib milik cabang aktor. Tanpa ini Owner cabang A dapat
+  // menyetujui kendala cabang B → mengubah order_item.qty (integritas nota) lintas cabang.
+  if (rows.some((r) => r.cabangId !== a.user.cabangId))
+    return { ok: false, error: "Item di luar cabang Anda." };
   if (rows.some((r) => !["dilaporkan", "disesuaikan"].includes(r.status)))
     return { ok: false, error: "Item sudah diproses sebelumnya." };
 
@@ -179,12 +183,15 @@ export async function tolakKendala(itemId: number, catatan: string): Promise<Act
   if ("error" in a) return { ok: false, error: a.error };
 
   const [row] = await db
-    .select({ id: kendalaItem.id, status: kendalaItem.status })
+    .select({ id: kendalaItem.id, status: kendalaItem.status, cabangId: kendalaItem.cabangId })
     .from(kendalaItem)
     .where(eq(kendalaItem.id, itemId))
     .limit(1);
 
   if (!row) return { ok: false, error: "Item tidak ditemukan." };
+  // IDOR: item kendala wajib milik cabang aktor (lihat approveKendala).
+  if (row.cabangId !== a.user.cabangId)
+    return { ok: false, error: "Item di luar cabang Anda." };
   if (!["dilaporkan", "disesuaikan"].includes(row.status))
     return { ok: false, error: "Item sudah diproses." };
 
